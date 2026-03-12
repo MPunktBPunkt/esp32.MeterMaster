@@ -231,11 +231,9 @@ Der Carousel-Modus zeigt mehrere Zähler nacheinander auf dem OLED an.
 ## 📁 Projektstruktur
 
 ```
-metermaster-esp32-node/
+esp32.MeterMaster/
 ├── MeterMaster_ESP32_Node.ino   Hauptsketch (single-file)
-├── CLAUDE-KONTEXT.md            Entwicklungskontext für Claude AI
-├── README.md                    Diese Datei
-└── releases/                    Kompilierte .bin Dateien
+└── README.md                    Diese Datei
 ```
 
 ---
