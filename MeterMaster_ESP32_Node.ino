@@ -327,6 +327,38 @@ String iobGet(const String& statePath) {
   return val;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+//  Log-Ringpuffer (Debug-Tab)
+//  Speichert die letzten LOG_SIZE Einträge im RAM.
+// ─────────────────────────────────────────────────────────────────────────────
+#define LOG_SIZE 30
+
+/** Ein Log-Eintrag mit Zeitstempel und Nachricht. */
+struct LogEntry {
+  unsigned long ts;   // millis() zum Zeitpunkt des Eintrags
+  String        msg;  // Log-Nachricht
+};
+
+LogEntry logBuf[LOG_SIZE];
+int logHead = 0;    // Index des nächsten Schreibplatzes (circular)
+int logCount = 0;   // Anzahl bisher gespeicherter Einträge
+
+/**
+ * Fügt eine Nachricht in den Log-Ringpuffer ein.
+ * Älteste Einträge werden überschrieben wenn der Puffer voll ist.
+ *
+ * @param msg  Die Log-Nachricht
+ */
+void addLog(const String& msg) {
+  logBuf[logHead].ts  = millis();
+  logBuf[logHead].msg = msg;
+  logHead = (logHead + 1) % LOG_SIZE;
+  if (logCount < LOG_SIZE) logCount++;
+  Serial.println("[LOG] " + msg);
+}
+
+
 void registerNode() {
   if (iobHost.isEmpty() || iobPort == 0) return;
   String base = "metermaster.0.nodes." + nodeMac + ".";
@@ -1743,7 +1775,7 @@ void hApiDiscover() {
 
 // GET /api/restart – Startet den ESP32 neu (nach 500 ms Verzögerung).
 void hApiRestart() {
-  server.send(200, "application/json", String("{"ok":true,"msg":"Neustart in 500ms"}"));
+  server.send(200, "application/json", String("{") + "\"ok\":true,\"msg\":\"Neustart in 500ms\"}");
   delay(500);
   ESP.restart();
 }
@@ -1809,38 +1841,6 @@ void hOtaFinish(){
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Setup
-// ─────────────────────────────────────────────────────────────────────────────
-// ─────────────────────────────────────────────────────────────────────────────
-//  Log-Ringpuffer (Debug-Tab)
-//  Speichert die letzten LOG_SIZE Einträge im RAM.
-// ─────────────────────────────────────────────────────────────────────────────
-#define LOG_SIZE 30
-
-/** Ein Log-Eintrag mit Zeitstempel und Nachricht. */
-struct LogEntry {
-  unsigned long ts;   // millis() zum Zeitpunkt des Eintrags
-  String        msg;  // Log-Nachricht
-};
-
-LogEntry logBuf[LOG_SIZE];
-int logHead = 0;    // Index des nächsten Schreibplatzes (circular)
-int logCount = 0;   // Anzahl bisher gespeicherter Einträge
-
-/**
- * Fügt eine Nachricht in den Log-Ringpuffer ein.
- * Älteste Einträge werden überschrieben wenn der Puffer voll ist.
- *
- * @param msg  Die Log-Nachricht
- */
-void addLog(const String& msg) {
-  logBuf[logHead].ts  = millis();
-  logBuf[logHead].msg = msg;
-  logHead = (logHead + 1) % LOG_SIZE;
-  if (logCount < LOG_SIZE) logCount++;
-  Serial.println("[LOG] " + msg);
-}
-
-
 void setup() {
   Serial.begin(115200);
   pinMode(LED_PIN, OUTPUT);
