@@ -1,6 +1,6 @@
 /*
  * ============================================================
- *  MeterMaster ESP32 Display Node  –  v1.5
+ *  MeterMaster ESP32 Display Node  –  v0.2.0
  *  Hardware: ESP32 D1 Mini + 64×48 OLED (SSD1306, I²C)
  * ============================================================
  *
@@ -30,7 +30,7 @@
 #include <Adafruit_SSD1306.h>
 #include <time.h>
 // ── Hardware ──────────────────────────────────────────────────────────────────
-#define FW_VERSION  "1.5.0"
+#define FW_VERSION  "0.2.0"
 #define GH_USER     "MPunktBPunkt"
 #define GH_REPO_ESP "esp32.MeterMaster"
 #define GH_REPO_IOB "iobroker.metermaster"
@@ -342,6 +342,7 @@ void registerNode() {
   iobSet(base+"name",     nodeName);
   iobSet(base+"version",  FW_VERSION);
   iobSet(base+"lastSeen", ts);
+  addLog("Node registriert: " + nodeMac);
   Serial.println("Node registered: " + nodeMac);
 }
 
@@ -390,7 +391,8 @@ void pollConfig() {
     saveSettings();
     saveCarousel();
     lastFetch = 0;  // sofort neu laden
-    Serial.println("Config vom ioBroker übernommen");
+    addLog("Config vom ioBroker übernommen");
+  Serial.println("Config vom ioBroker übernommen");
     // Config-State zurücksetzen (quittieren)
     iobSet(base + "configAck", String(millis()));
   }
@@ -626,6 +628,7 @@ select option{background:#18152a}
   <div class="tab"     onclick="tab('al')">Alarm</div>
   <div class="tab"     onclick="tab('bt')">Bluetooth</div>
   <div class="tab"     onclick="tab('car')">Carousel</div>
+  <div class="tab"     onclick="tab('dbg')">Debug</div>
   <div class="tab"     onclick="tab('ota')">OTA</div>
   <div class="tab"     onclick="tab('info')">Info</div>
 </div>
@@ -864,11 +867,12 @@ const char H_INFO[] PROGMEM = R"RAW(
   </div>
   <div class="card">
     <div class="h2"><i>📝</i>Changelog</div>
-    <div class="irow"><span class="ik">v1.4.0</span><span class="iv" style="font-size:.75rem;text-align:right">Info-Tab, GitHub OTA,<br>OLED-Stile, Adapter-Version</span></div>
-    <div class="irow"><span class="ik">v1.3.0</span><span class="iv" style="font-size:.75rem;text-align:right">Alarm-Tab, Bluetooth-Tab,<br>Discover im Einstellungen-Tab</span></div>
-    <div class="irow"><span class="ik">v1.2.0</span><span class="iv" style="font-size:.75rem;text-align:right">NTP-Zeit, WLAN-Tab,<br>LED-Steuerung, Lila Theme</span></div>
-    <div class="irow"><span class="ik">v1.1.0</span><span class="iv" style="font-size:.75rem;text-align:right">ioBroker Discover-Dropdown,<br>OTA Update, Web-Interface</span></div>
-    <div class="irow"><span class="ik">v1.0.0</span><span class="iv" style="font-size:.75rem;text-align:right">Erstveröffentlichung</span></div>
+    <div class="irow"><span class="ik">v0.2.0</span><span class="iv" style="font-size:.75rem;text-align:right">Carousel, Node-Reg.,<br>Debug-Tab, Bugfixes</span></div>
+    <div class="irow"><span class="ik">v0.1.4</span><span class="iv" style="font-size:.75rem;text-align:right">Info-Tab, GitHub OTA,<br>OLED-Stile, Adapter-Version</span></div>
+    <div class="irow"><span class="ik">v0.1.3</span><span class="iv" style="font-size:.75rem;text-align:right">Alarm-Tab, Bluetooth-Tab,<br>Discover im Einstellungen-Tab</span></div>
+    <div class="irow"><span class="ik">v0.1.2</span><span class="iv" style="font-size:.75rem;text-align:right">NTP-Zeit, WLAN-Tab,<br>LED-Steuerung, Lila Theme</span></div>
+    <div class="irow"><span class="ik">v0.1.1</span><span class="iv" style="font-size:.75rem;text-align:right">ioBroker Discover-Dropdown,<br>OTA Update, Web-Interface</span></div>
+    <div class="irow"><span class="ik">v0.1.0</span><span class="iv" style="font-size:.75rem;text-align:right">Erstveröffentlichung</span></div>
   </div>
   <div class="card">
     <div class="h2"><i>🔗</i>GitHub Repositories</div>
@@ -876,7 +880,7 @@ const char H_INFO[] PROGMEM = R"RAW(
       <span class="ik">ESP32 Node</span>
       <a id="ghEspLink" href="#" target="_blank"
          style="font-size:.78rem;color:var(--p2);text-decoration:none">
-        MPunktBPunkt/metermaster-esp32-node ↗
+        MPunktBPunkt/esp32.MeterMaster ↗
       </a>
     </div>
     <div class="irow">
@@ -1019,9 +1023,49 @@ const char H_OTA[] PROGMEM = R"RAW(
 </div>
 )RAW";
 
+const char H_DBG[] PROGMEM = R"RAW(
+<div id="dbg" class="pg">
+  <div id="alDbg" class="al"></div>
+  <div class="card acc">
+    <div class="h2"><i>🪲</i>Debug Log
+      <button class="btn sm sec" style="margin:0 0 0 auto;padding:4px 10px" onclick="clearLog()">Leeren</button>
+      <button class="btn sm" style="margin:0 0 0 6px;padding:4px 10px" onclick="loadLog()">🔄</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+      <label style="display:flex;align-items:center;gap:6px;font-size:.8rem;cursor:pointer">
+        <input type="checkbox" id="autoRef" checked style="width:auto"> Auto-Refresh (3s)
+      </label>
+      <span style="font-size:.75rem;color:var(--mut)" id="logMeta"></span>
+    </div>
+    <div id="logBox" style="background:#0d0d14;border:1px solid var(--brd);border-radius:8px;
+         padding:10px;font-family:monospace;font-size:.72rem;max-height:420px;overflow-y:auto;
+         color:#c4b5fd;line-height:1.7"></div>
+  </div>
+  <div class="card">
+    <div class="h2"><i>💾</i>Speicher</div>
+    <div class="g2">
+      <div class="cell"><div class="k">Heap frei</div><div class="v" id="dbgHeap">–</div></div>
+      <div class="cell"><div class="k">Min. Heap</div><div class="v" id="dbgMinHeap">–</div></div>
+    </div>
+    <div id="dbgHeapBar" style="margin-top:10px;height:6px;border-radius:3px;background:var(--brd)">
+      <div id="dbgHeapFill" style="height:6px;border-radius:3px;background:linear-gradient(90deg,#a78bfa,#7c3aed);transition:width .4s;width:0%"></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="h2"><i>⚙️</i>Debug-Aktionen</div>
+    <div style="display:flex;gap:7px;flex-wrap:wrap">
+      <button class="btn sm sec" onclick="dbgFetch()">🔄 Fetch auslösen</button>
+      <button class="btn sm sec" onclick="dbgRegister()">📡 Node registrieren</button>
+      <button class="btn sm sec" onclick="dbgRestart()">♻️ ESP32 neu starten</button>
+    </div>
+    <div id="alDbgAct" class="al" style="margin-top:8px"></div>
+  </div>
+</div>
+)RAW";
+
 const char H_JS[] PROGMEM = R"RAW(
 <script>
-const TABS=['db','cfg','wl','al','bt','car','ota','info'];
+const TABS=['db','cfg','wl','al','bt','car','dbg','ota','info'];
 let discStates=[];
 
 function tab(id){
@@ -1032,6 +1076,7 @@ function tab(id){
   if(id==='wl') loadSys();
   if(id==='al') loadAlarmUI();
   if(id==='info') loadInfo();
+  if(id==='dbg')  loadLog();
   if(id==='car')  loadCarouselUI();
 }
 
@@ -1292,8 +1337,8 @@ function carFromDiscover() {
 }
 
 function carRemove(i) { carEntries.splice(i,1); renderCarList(); document.getElementById('carCount').textContent=carEntries.length+' / 5 Zähler'; }
-function carMoveUp(i) { if(i<1)return; var _t=carEntries[i]; carEntries[i]=carEntries[i-1]; carEntries[i-1]=_t;; renderCarList(); }
-function carMoveDown(i){ if(i>=carEntries.length-1)return; var _t=carEntries[i]; carEntries[i]=carEntries[i+1]; carEntries[i+1]=_t;; renderCarList(); }
+function carMoveUp(i) { if(i<1)return; var _t=carEntries[i]; carEntries[i]=carEntries[i-1]; carEntries[i-1]=_t; renderCarList(); }
+function carMoveDown(i){ if(i>=carEntries.length-1)return; var _t=carEntries[i]; carEntries[i]=carEntries[i+1]; carEntries[i+1]=_t; renderCarList(); }
 
 function carSave() {
   const b = {
@@ -1345,6 +1390,120 @@ function upload(f){
   xhr.open('POST','/update');xhr.send(fd);
 }
 
+// ── Debug / Log ───────────────────────────────────────────────────────────────
+var logAutoRef = null;
+
+function loadLog() {
+  fetch('/api/log').then(r=>r.json()).then(function(entries){
+    var box = document.getElementById('logBox');
+    if (!entries.length) {
+      box.innerHTML = '<span style="color:var(--mut)">Noch keine Einträge.</span>';
+      document.getElementById('logMeta').textContent = "";
+      return;
+    }
+    document.getElementById('logMeta').textContent = entries.length + ' Einträge';
+    var html = "";
+    for (var i = entries.length - 1; i >= 0; i--) {
+      var e = entries[i];
+      var t = (e.ts / 1000).toFixed(1);
+      html += '<div style="border-bottom:1px solid rgba(255,255,255,.05);padding:2px 0">'
+            + '<span style="color:#6b7280;margin-right:8px">[' + t + 's]</span>'
+            + '<span>' + e.msg.replace(/</g,"&lt;") + '</span></div>';
+    }
+    box.innerHTML = html;
+    box.scrollTop = box.scrollHeight;
+  }).catch(function(){ al('alDbg','err','Log nicht ladbar'); });
+  // Heap
+  fetch('/api/sysinfo').then(r=>r.json()).then(function(d){
+    document.getElementById('dbgHeap').textContent = (d.heapFree/1024).toFixed(1)+' KB';
+    document.getElementById('dbgMinHeap').textContent = (d.heapTotal/1024).toFixed(1)+' KB gesamt';
+    var pct = Math.round(d.heapFree / d.heapTotal * 100);
+    document.getElementById('dbgHeapFill').style.width = pct + '%';
+  }).catch(function(){});
+  // Auto-refresh
+  if (document.getElementById('autoRef') && document.getElementById('autoRef').checked) {
+    clearTimeout(logAutoRef);
+    logAutoRef = setTimeout(loadLog, 3000);
+  }
+}
+
+function clearLog() {
+  document.getElementById('logBox').innerHTML = '<span style="color:var(--mut)">Geleert (nur lokal).</span>';
+  document.getElementById('logMeta').textContent = "";
+}
+
+function dbgFetch() {
+  fetch('/api/status').then(r=>r.json()).then(function(d){
+    al('alDbgAct','ok','Fetch OK: ' + d.value + ' ' + d.unit, 3000);
+    loadLog();
+  }).catch(function(){ al('alDbgAct','err','Fetch fehlgeschlagen', 3000); });
+}
+
+function dbgRegister() {
+  fetch('/api/nodeinfo').then(r=>r.json()).then(function(d){
+    al('alDbgAct','ok','Node: ' + d.mac + ' | IP: ' + d.ip, 3000);
+    loadLog();
+  }).catch(function(){ al('alDbgAct','err','Fehler', 3000); });
+}
+
+function dbgRestart() {
+  if (!confirm('ESP32 wirklich neu starten?')) return;
+  fetch('/api/restart')
+  .finally(function(){ al('alDbgAct','inf','Neustart ausgelöst...', 5000); });
+}
+
+// ── Info Tab ──────────────────────────────────────────────────────────────────
+var GH_U = 'MPunktBPunkt';
+var GH_E = 'esp32.MeterMaster';
+var GH_I = 'iobroker.metermaster';
+
+function loadInfo() {
+  fetch('/api/version').then(r=>r.json()).then(function(d){
+    document.getElementById('infoVer').textContent = 'v' + d.version + ' (Build: ' + d.build + ')';
+    var url = 'https://github.com/' + GH_U + '/' + GH_E;
+    var el = document.getElementById('ghEspLink');
+    if (el) { el.href = url; el.textContent = GH_U + '/' + GH_E + ' ↗'; }
+  }).catch(function(){});
+}
+
+function checkUpdate() {
+  fetch('/api/version').then(r=>r.json()).then(function(d){
+    document.getElementById('otaFwCur').textContent = 'v' + d.version;
+    al('alOtaCheck', 'inf', 'Prüfe GitHub…');
+    fetch('https://api.github.com/repos/' + GH_U + '/' + GH_E + '/releases/latest',
+      {headers: {'Accept': 'application/vnd.github.v3+json'}})
+    .then(r=>r.json()).then(function(rel){
+      var latest = (rel.tag_name || '').replace(/^v/, '');
+      document.getElementById('otaFwNew').textContent = 'v' + latest;
+      if (!latest) { al('alOtaCheck','warn','Noch kein Release auf GitHub.'); return; }
+      if (latest === d.version) {
+        al('alOtaCheck', 'ok', '✓ Firmware ist aktuell (v' + latest + ').', 5000);
+        document.getElementById('otaDlBtn').style.display = 'none';
+      } else {
+        al('alOtaCheck', 'warn', '⬆ Neue Version v' + latest + ' verfügbar!');
+        var asset = (rel.assets || []).find(function(a){ return a.name.endsWith('.bin'); });
+        var btn = document.getElementById('otaDlBtn');
+        btn.href = asset ? asset.browser_download_url : rel.html_url;
+        btn.style.display = '';
+        btn.textContent = asset ? '⬇ Download .bin' : '⬇ Release öffnen';
+      }
+    }).catch(function(){ al('alOtaCheck','err','GitHub nicht erreichbar.'); });
+  });
+}
+
+function loadAdapterVersion() {
+  fetch('https://api.github.com/repos/' + GH_U + '/' + GH_I + '/releases/latest',
+    {headers: {'Accept': 'application/vnd.github.v3+json'}})
+  .then(r=>r.json()).then(function(d){
+    var el = document.getElementById('adapterVerVal');
+    if (el) el.textContent = (d.tag_name || '–') + ' auf GitHub';
+  }).catch(function(){
+    var el = document.getElementById('adapterVerVal');
+    if (el) el.textContent = '(GitHub nicht erreichbar)';
+  });
+}
+
+
 window.onload=()=>{refreshDash();loadCfg();};
 </script></body></html>
 )RAW";
@@ -1354,7 +1513,7 @@ String buildPage() {
   String h; h.reserve(18000);
   h += FPSTR(H_HEAD); h += FPSTR(H_DB);   h += FPSTR(H_CFG);
   h += FPSTR(H_WL);   h += FPSTR(H_AL);   h += FPSTR(H_BT);
-  h += FPSTR(H_CAR);  h += FPSTR(H_OTA);  h += FPSTR(H_INFO); h += FPSTR(H_JS);
+  h += FPSTR(H_CAR);  h += FPSTR(H_DBG);  h += FPSTR(H_OTA);  h += FPSTR(H_INFO); h += FPSTR(H_JS);
   return h;
 }
 
@@ -1558,11 +1717,12 @@ void hApiDiscover() {
   if(code!=200){http.end();server.send(200,"application/json",
     "{\"ok\":false,\"msg\":\"HTTP "+String(code)+" – simple-api aktiv?\"}");return;}
   String body=http.getString(); http.end();
-  DynamicJsonDocument doc(8192); doc.clear();
+  DynamicJsonDocument doc(16384); doc.clear();
   if(deserializeJson(doc,body)){server.send(200,"application/json","{\"ok\":false,\"msg\":\"JSON-Fehler\"}");return;}
   String r="{\"ok\":true,\"states\":["; bool first=true;
   for(JsonPair kv:doc.as<JsonObject>()){
     String sid=kv.key().c_str(); JsonVariant sv=kv.value();
+    if(sv["val"].isNull()) continue;
     if(!sv["val"].is<float>()&&!sv["val"].is<int>()) continue;
     float val=sv["val"].as<float>();
     String lbl=sid; int d2=sid.indexOf('.',sid.indexOf('.')+1);
@@ -1578,6 +1738,29 @@ void hApiDiscover() {
     first=false;
   }
   r+="]}"; server.send(200,"application/json",r);
+}
+
+
+// GET /api/restart – Startet den ESP32 neu (nach 500 ms Verzögerung).
+void hApiRestart() {
+  server.send(200, "application/json", String("{"ok":true,"msg":"Neustart in 500ms"}"));
+  delay(500);
+  ESP.restart();
+}
+
+// GET /api/log – Gibt die letzten LOG_SIZE Log-Einträge als JSON-Array zurück.
+void hApiLog() {
+  String r = "[";
+  int count = min(logCount, LOG_SIZE);
+  for (int i = 0; i < count; i++) {
+    int idx = (logHead - count + i + LOG_SIZE) % LOG_SIZE;
+    if (i) r += ",";
+    String m = logBuf[idx].msg;
+    m.replace("\\", "\\\\"); m.replace("\"", "\\\"");
+    r += String("{\"ts\":") + String(logBuf[idx].ts) + ",\"msg\":\"" + m + "\"}";
+  }
+  r += "]";
+  server.send(200, "application/json", r);
 }
 
 void hApiLed() {
@@ -1627,6 +1810,37 @@ void hOtaFinish(){
 // ─────────────────────────────────────────────────────────────────────────────
 //  Setup
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+//  Log-Ringpuffer (Debug-Tab)
+//  Speichert die letzten LOG_SIZE Einträge im RAM.
+// ─────────────────────────────────────────────────────────────────────────────
+#define LOG_SIZE 30
+
+/** Ein Log-Eintrag mit Zeitstempel und Nachricht. */
+struct LogEntry {
+  unsigned long ts;   // millis() zum Zeitpunkt des Eintrags
+  String        msg;  // Log-Nachricht
+};
+
+LogEntry logBuf[LOG_SIZE];
+int logHead = 0;    // Index des nächsten Schreibplatzes (circular)
+int logCount = 0;   // Anzahl bisher gespeicherter Einträge
+
+/**
+ * Fügt eine Nachricht in den Log-Ringpuffer ein.
+ * Älteste Einträge werden überschrieben wenn der Puffer voll ist.
+ *
+ * @param msg  Die Log-Nachricht
+ */
+void addLog(const String& msg) {
+  logBuf[logHead].ts  = millis();
+  logBuf[logHead].msg = msg;
+  logHead = (logHead + 1) % LOG_SIZE;
+  if (logCount < LOG_SIZE) logCount++;
+  Serial.println("[LOG] " + msg);
+}
+
+
 void setup() {
   Serial.begin(115200);
   pinMode(LED_PIN, OUTPUT);
@@ -1671,10 +1885,13 @@ void setup() {
   server.on("/api/carousel", HTTP_POST, hApiCarouselPost);
   server.on("/api/carousel/next", HTTP_GET, hApiCarouselNext);
   server.on("/api/nodename", HTTP_GET,  hApiNodeName);
+  server.on("/api/log",      HTTP_GET,  hApiLog);
+  server.on("/api/restart",  HTTP_GET,  hApiRestart);
   server.on("/update",       HTTP_POST, hOtaFinish, hOtaUpload);
 
   nodeMac = WiFi.macAddress();
   nodeMac.replace(":", "");
+  addLog("Gestart. IP: " + WiFi.localIP().toString() + " MAC: " + nodeMac);
   loadCarousel();
   registerNode();
   lastRegister   = millis();
