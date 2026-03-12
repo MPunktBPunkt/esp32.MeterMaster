@@ -1,8 +1,13 @@
 # ESP32 ↔ ioBroker Adapter – Datenaustausch
 
-> **Status:** Beschreibt den geplanten Datenaustausch für `iobroker.metermaster` >= v0.5.0  
+> **Status:** Implementiert und im Feldeinsatz bestätigt (v0.3.0, 12.03.2026)  
+> Adapter-Gegenseite (iobroker.metermaster >= v0.5.0) steht noch aus.
+>
+> Bestätigt funktionsfähig: Node-Registrierung, Heartbeat, Simple-API Fetch, Discover
+>
+> ~~Beschreibt den geplanten Datenaustausch~~ für `iobroker.metermaster` >= v0.5.0  
 > Der Adapter wird in einem separaten Schritt angepasst.  
-> ESP32-Firmware: `MeterMaster_ESP32_Node` ab v0.2.0
+> ESP32-Firmware: `MeterMaster_ESP32_Node` ab v0.3.0
 
 ---
 
