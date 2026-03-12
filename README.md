@@ -8,26 +8,29 @@ Ein WLAN-Display-Node für das [MeterMaster](https://github.com/MPunktBPunkt)-Ö
 
 ## Screenshots
 
+### OLED – Display-Ansicht
+![OLED](docs/screenshots/oled-standard.jpg)
+
 ### Dashboard – Aktueller Zählerwert
-![Dashboard](docs/screenshots/dashboard.png)
+![Dashboard](docs/screenshots/dashboard.jpg)
 
 ### Einstellungen – ioBroker Verbindung & Zählerauswahl
-![Einstellungen](docs/screenshots/einstellungen-tab.png)
+![Einstellungen](docs/screenshots/einstellungen-tab.jpg)
 
 ### WLAN & Systeminfo
-![WLAN](docs/screenshots/wlan-tab.png)
+![WLAN](docs/screenshots/wlan-tab.jpg)
 
 ### Alarm
-![Alarm](docs/screenshots/alarm-tab.png)
+![Alarm](docs/screenshots/alarm-tab.jpg)
 
 ### Carousel – Mehrere Zähler automatisch blättern
-![Carousel](docs/screenshots/carousel-tab.png)
+![Carousel](docs/screenshots/carousel-tab.jpg)
 
 ### OTA – Firmware-Update über Browser
-![OTA](docs/screenshots/ota-tab.png)
+![OTA](docs/screenshots/ota-tab.jpg)
 
 ### Info & Changelog
-![Info](docs/screenshots/info-tab.png)
+![Info](docs/screenshots/info-tab.jpg)
 
 ---
 

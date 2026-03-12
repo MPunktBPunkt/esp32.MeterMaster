@@ -124,10 +124,10 @@ void formatTs(long long tsMs) {
 //  OLED  (64×48 – textSize 1 = 6×8px, 10 Zeichen × 6 Zeilen)
 //
 //  Layout (U8g2, Baseline-Koordinaten):
-//    y= 6   Zeile 1: Label         (u8g2_font_5x7_tr)
+//    y= 6   Zeile 1: Label         (u8g2_font_5x7_tf)
 //    y= 8   Trennlinie
-//    y=19   Zeile 2: Wert          (u8g2_font_7x13_tr oder 10x20)
-//    y=29   Zeile 3: Einheit       (u8g2_font_5x7_tr)
+//    y=19   Zeile 2: Wert          (u8g2_font_7x13_tf oder 10x20)
+//    y=29   Zeile 3: Einheit       (u8g2_font_5x7_tf)
 //    y=37   Zeile 4: Uhrzeit       (u8g2_font_baby_tf)
 //    y=45   Zeile 5: Datum         (u8g2_font_baby_tf)  + Dot (61,42)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -145,10 +145,27 @@ void u8dot(bool ok) {
   else    u8g2.drawFrame(60, 43, 4, 4);
 }
 
+
+// Kürzt einen UTF-8 String auf maxLen sichtbare Zeichen (nicht Bytes).
+// Verhindert abgeschnittene Umlaute (ä/ö/ü = 2 Bytes in UTF-8).
+String utf8Clip(const String& s, uint8_t maxLen) {
+  uint8_t chars = 0;
+  uint16_t i = 0;
+  while (i < s.length() && chars < maxLen) {
+    uint8_t b = (uint8_t)s[i];
+    if      (b < 0x80) i += 1;  // ASCII
+    else if (b < 0xE0) i += 2;  // 2-Byte (ä ö ü etc.)
+    else if (b < 0xF0) i += 3;  // 3-Byte
+    else               i += 4;  // 4-Byte
+    chars++;
+  }
+  return s.substring(0, i);
+}
+
 // Zeigt einfache 3-Zeilen-Meldung (Startmeldungen, OTA-Status, WLAN-Setup).
 void oledClear(const char* l1="", const char* l2="", const char* l3="") {
   u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_5x7_tr);
+  u8g2.setFont(u8g2_font_5x7_tf);
   u8g2.drawStr(0,  8, l1);
   u8g2.drawStr(0, 22, l2);
   u8g2.drawStr(0, 36, l3);
@@ -167,27 +184,27 @@ void oledValue() {
 
   if (oledStyle == 1) {
     // ── Stil 1: GROSS – Label + großer Wert + Einheit ────────────────────────
-    String lbl = meterLabel; if (lbl.length() > 10) lbl = lbl.substring(0, 10);
-    u8g2.setFont(u8g2_font_5x7_tr);
+    String lbl = meterLabel; lbl = utf8Clip(lbl, 10);
+    u8g2.setFont(u8g2_font_5x7_tf);
     u8g2.drawStr(0, 7, lbl.c_str());
     u8g2.drawHLine(0, 9, 64);
     // Wert: 10x20 wenn <= 5 Zeichen, sonst 7x13
     if (v.length() <= 5) {
-      u8g2.setFont(u8g2_font_10x20_tr);
+      u8g2.setFont(u8g2_font_10x20_tf);
       u8drawCenter(v.c_str(), 33);
     } else {
-      u8g2.setFont(u8g2_font_7x13_tr);
+      u8g2.setFont(u8g2_font_7x13_tf);
       u8drawCenter(v.c_str(), 26);
     }
-    u8g2.setFont(u8g2_font_5x7_tr);
+    u8g2.setFont(u8g2_font_5x7_tf);
     u8g2.drawStr(0, 45, meterUnit.c_str());
     u8dot(fetchOk);
 
   } else if (oledStyle == 2) {
     // ── Stil 2: MINIMAL – nur Wert + Einheit, alles zentriert ────────────────
-    u8g2.setFont(u8g2_font_7x13_tr);
+    u8g2.setFont(u8g2_font_7x13_tf);
     u8drawCenter(v.c_str(), 22);
-    u8g2.setFont(u8g2_font_5x7_tr);
+    u8g2.setFont(u8g2_font_5x7_tf);
     String u = meterUnit; if (u.length() > 5) u = u.substring(0, 5);
     u8drawCenter(u.c_str(), 35);
     u8dot(fetchOk);
@@ -197,11 +214,11 @@ void oledValue() {
     u8g2.setDrawColor(1);
     u8g2.drawBox(0, 0, 64, 48);           // weißes Rechteck
     u8g2.setDrawColor(0);                 // schwarze Schrift
-    String lbl = meterLabel; if (lbl.length() > 10) lbl = lbl.substring(0, 10);
-    u8g2.setFont(u8g2_font_5x7_tr);
+    String lbl = meterLabel; lbl = utf8Clip(lbl, 10);
+    u8g2.setFont(u8g2_font_5x7_tf);
     u8g2.drawStr(0, 7, lbl.c_str());
     u8g2.drawHLine(0, 9, 64);
-    u8g2.setFont(u8g2_font_7x13_tr);
+    u8g2.setFont(u8g2_font_7x13_tf);
     u8drawCenter(v.c_str(), 25);
     u8g2.setFont(u8g2_font_baby_tf);
     u8g2.drawStr(0, 34, meterUnit.c_str());
@@ -212,18 +229,24 @@ void oledValue() {
 
   } else {
     // ── Stil 0: STANDARD ─────────────────────────────────────────────────────
-    String lbl = meterLabel; if (lbl.length() > 10) lbl = lbl.substring(0, 10);
-    u8g2.setFont(u8g2_font_5x7_tr);
+    String lbl = meterLabel; lbl = utf8Clip(lbl, 10);
+    u8g2.setFont(u8g2_font_5x7_tf);
     u8g2.drawStr(0, 7, lbl.c_str());
     u8g2.drawHLine(0, 9, 64);
-    u8g2.setFont(u8g2_font_7x13_tr);
-    u8drawCenter(v.c_str(), 24);
-    u8g2.setFont(u8g2_font_5x7_tr);
+    // Wert: 10x20 wenn <= 4 Zeichen (z.B. "2879"), sonst 7x13
+    if (v.length() <= 4) {
+      u8g2.setFont(u8g2_font_10x20_tf);
+      u8drawCenter(v.c_str(), 27);
+    } else {
+      u8g2.setFont(u8g2_font_7x13_tf);
+      u8drawCenter(v.c_str(), 24);
+    }
+    u8g2.setFont(u8g2_font_5x7_tf);
     String unit = meterUnit; if (unit.length() > 5) unit = unit.substring(0, 5);
-    u8g2.drawStr(0, 33, unit.c_str());
-    if (alarmActive) { u8g2.drawStr(30, 33, "!ALM"); }
+    u8g2.drawStr(0, 37, unit.c_str());
+    if (alarmActive) { u8g2.drawStr(30, 37, "!ALM"); }
     u8g2.setFont(u8g2_font_baby_tf);
-    u8g2.drawStr(0, 40, lastReadingTime.c_str());
+    u8g2.drawStr(0, 42, lastReadingTime.c_str());
     u8g2.drawStr(0, 47, lastReadingDate.c_str());
     u8dot(fetchOk);
   }
@@ -906,7 +929,7 @@ const char H_INFO[] PROGMEM = R"RAW(
   </div>
   <div class="card">
     <div class="h2"><i>📝</i>Changelog</div>
-    <div class="irow"><span class="ik">v0.3.0</span><span class="iv" style="font-size:.75rem;text-align:right">Carousel, Node-Reg.,<br>Debug-Tab, Bugfixes</span></div>
+    <div class="irow"><span class="ik">v0.3.0</span><span class="iv" style="font-size:.75rem;text-align:right">U8g2 OLED, Umlaute,<br>GitHub OTA-Dropdown</span></div>
     <div class="irow"><span class="ik">v0.1.4</span><span class="iv" style="font-size:.75rem;text-align:right">Info-Tab, GitHub OTA,<br>OLED-Stile, Adapter-Version</span></div>
     <div class="irow"><span class="ik">v0.1.3</span><span class="iv" style="font-size:.75rem;text-align:right">Alarm-Tab, Bluetooth-Tab,<br>Discover im Einstellungen-Tab</span></div>
     <div class="irow"><span class="ik">v0.1.2</span><span class="iv" style="font-size:.75rem;text-align:right">NTP-Zeit, WLAN-Tab,<br>LED-Steuerung, Lila Theme</span></div>
@@ -1214,6 +1237,23 @@ function saveOled(){
 }
 
 // ── Einstellungen ─────────────────────────────────────────────────────────────
+
+// ── OLED Stil-Auswahl ─────────────────────────────────────────────────────────
+var curStyle = 0;
+
+// Markiert den gewählten Stil-Button und merkt die Wahl in curStyle.
+function setStyle(s) {
+  curStyle = s;
+  document.querySelectorAll('.style-btn').forEach(function(b) {
+    b.classList.toggle('act', parseInt(b.getAttribute('data-s')) === s);
+  });
+}
+
+// Initialisiert die Stil-Buttons mit dem vom ESP32 gelesenen Stil.
+function initStyleBtns(s) {
+  setStyle(parseInt(s) || 0);
+}
+
 function loadCfg(){
   loadAdapterVersion();
   fetch('/api/settings').then(r=>r.json()).then(d=>{
@@ -1530,6 +1570,19 @@ function loadInfo() {
   }).catch(function(){});
 }
 
+
+// Vergleicht zwei Versions-Strings (z.B. "0.3.0" vs "0.2.0").
+// Gibt >0 zurück wenn a neuer, <0 wenn b neuer, 0 wenn gleich.
+function semverCmp(a, b) {
+  var pa = a.split('.').map(Number);
+  var pb = b.split('.').map(Number);
+  for (var i = 0; i < 3; i++) {
+    var d = (pa[i]||0) - (pb[i]||0);
+    if (d !== 0) return d;
+  }
+  return 0;
+}
+
 // Gespeicherte Releases-Liste und aktuelle Firmware-Version
 var ghReleases = [];
 var curFwVer = '';
@@ -1576,9 +1629,12 @@ function loadReleases() {
         sel.appendChild(opt);
       });
 
-      // Vergleich installiert vs. neueste
-      if (latest === curFwVer) {
+      // Vergleich installiert vs. neueste (semver-aware)
+      var cmp = semverCmp(curFwVer, latest);
+      if (cmp === 0) {
         al('alOtaCheck','ok','✓ Firmware ist aktuell (v' + latest + ').', 5000);
+      } else if (cmp > 0) {
+        al('alOtaCheck','inf','ℹ Installiert (v' + curFwVer + ') ist neuer als letztes Release (v' + latest + ').');
       } else {
         al('alOtaCheck','warn','⬆ Neue Version v' + latest + ' verfügbar!');
       }
@@ -2116,3 +2172,4 @@ void loop() {
     handleBlink();
   }
 }
+
