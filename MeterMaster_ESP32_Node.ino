@@ -1913,23 +1913,22 @@ void hApiDiscover() {
 // Body: {"url":"https://...bin","version":"v0.3.0"}
 void hApiOtaGithub() {
   if (!server.hasArg("plain")) {
-    server.send(400, "application/json", String("{"ok":false,"msg":"Kein Body"}"));
-    return;
+    server.send(400, "application/json", String("{") + "\"ok\":false,\"msg\":\"Kein Body\"}"); return;
   }
   DynamicJsonDocument doc(512);
   if (deserializeJson(doc, server.arg("plain"))) {
-    server.send(400, "application/json", String("{"ok":false,"msg":"JSON-Fehler"}"));
+    server.send(400, "application/json", String("{") + "\"ok\":false,\"msg\":\"JSON-Fehler\"}");
     return;
   }
   String url = doc["url"].as<String>();
   String ver = doc["version"] | String("?");
   if (!url.startsWith("http")) {
-    server.send(400, "application/json", String("{"ok":false,"msg":"Ungültige URL"}"));
+    server.send(400, "application/json", String("{") + "\"ok\":false,\"msg\":\"Ungueltige URL\"}");
     return;
   }
 
   // Sofort antworten – OTA blockiert den WebServer
-  server.send(200, "application/json", String("{"ok":true,"msg":"OTA gestartet"}"));
+  server.send(200, "application/json", String("{") + "\"ok\":true,\"msg\":\"OTA gestartet\"}");
   addLog("OTA GitHub: lade " + ver + " von " + url);
 
   delay(200);  // Antwort senden lassen
@@ -2117,4 +2116,3 @@ void loop() {
     handleBlink();
   }
 }
-
