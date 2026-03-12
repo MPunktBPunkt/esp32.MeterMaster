@@ -30,6 +30,11 @@
 #include <Adafruit_SSD1306.h>
 #include <time.h>
 // ── Hardware ──────────────────────────────────────────────────────────────────
+#define FW_VERSION  "1.5.0"
+#define GH_USER     "MPunktBPunkt"
+#define GH_REPO_ESP "esp32.MeterMaster"
+#define GH_REPO_IOB "iobroker.metermaster"
+
 #define SDA_PIN    21
 #define SCL_PIN    22
 #define SCREEN_W   64
@@ -71,6 +76,7 @@ String        lastReadingTime= "--:--";
 String        lastReadingDate= "--.--.";
 bool          ntpSynced      = false;
 bool          alarmActive    = false;
+int           oledStyle      = 0;   // 0=Standard 1=Gross 2=Minimal 3=Invertiert
 
 // ── Carousel ──────────────────────────────────────────────────────────────────
 #define CAROUSEL_MAX 5
@@ -312,7 +318,8 @@ String iobGet(const String& statePath) {
     StaticJsonDocument<64> f; f["val"] = true;
     DynamicJsonDocument doc(256);
     if (!deserializeJson(doc, http.getString(), DeserializationOption::Filter(f))) {
-      JsonVariant s = doc.is<JsonArray>() ? doc[0] : doc.as<JsonVariant>();
+      JsonVariant s;
+      if(doc.is<JsonArray>()) s=doc[0]; else s=doc.as<JsonVariant>();
       val = s["val"].as<String>();
     }
   }
@@ -328,7 +335,7 @@ void registerNode() {
   if (ntpSynced) {
     struct tm ti; if (getLocalTime(&ti)) {
       time_t t = mktime(&ti);
-      ts = String((long long)t * 1000);
+      char tsbuf[24]; snprintf(tsbuf, sizeof(tsbuf), "%lld", (long long)t * 1000LL); ts = String(tsbuf);
     }
   }
   iobSet(base+"ip",       WiFi.localIP().toString());
@@ -487,6 +494,7 @@ void handleBlink() {
 // ─────────────────────────────────────────────────────────────────────────────
 //  HTML  (PROGMEM-Segmente)
 // ─────────────────────────────────────────────────────────────────────────────
+
 const char H_HEAD[] PROGMEM = R"RAW(<!DOCTYPE html>
 <html lang="de"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -623,7 +631,6 @@ select option{background:#18152a}
 </div>
 )RAW";
 
-// ── Dashboard ──────────────────────────────────────────────────────────────────
 const char H_DB[] PROGMEM = R"RAW(
 <div id="db" class="pg act">
   <div class="card acc">
@@ -687,7 +694,6 @@ const char H_DB[] PROGMEM = R"RAW(
 </div>
 )RAW";
 
-// ── Einstellungen ──────────────────────────────────────────────────────────────
 const char H_CFG[] PROGMEM = R"RAW(
 <div id="cfg" class="pg">
   <div id="alCfg" class="al"></div>
@@ -730,7 +736,6 @@ const char H_CFG[] PROGMEM = R"RAW(
 </div>
 )RAW";
 
-// ── WLAN & System ──────────────────────────────────────────────────────────────
 const char H_WL[] PROGMEM = R"RAW(
 <div id="wl" class="pg">
   <div class="card acc">
@@ -774,7 +779,6 @@ const char H_WL[] PROGMEM = R"RAW(
 </div>
 )RAW";
 
-// ── Alarm ──────────────────────────────────────────────────────────────────────
 const char H_AL[] PROGMEM = R"RAW(
 <div id="al" class="pg">
   <div id="alAl" class="al"></div>
@@ -820,7 +824,6 @@ const char H_AL[] PROGMEM = R"RAW(
 </div>
 )RAW";
 
-// ── Bluetooth ──────────────────────────────────────────────────────────────────
 const char H_BT[] PROGMEM = R"RAW(
 <div id="bt" class="pg">
   <div class="card acc">
@@ -850,170 +853,6 @@ const char H_BT[] PROGMEM = R"RAW(
 </div>
 )RAW";
 
-// ── OLED Stil ────────────────────────────────────────────────────────────────
-let curStyle=0;
-function setStyle(s){
-  curStyle=s;
-  document.querySelectorAll('.style-btn').forEach(b=>{
-    b.classList.toggle('act',parseInt(b.dataset.s)===s);
-  });
-}
-function initStyleBtns(s){setStyle(s);}
-
-// ── Info Tab ──────────────────────────────────────────────────────────────────
-const GH_USER='MPunktBPunkt', GH_REPO_ESP='metermaster-esp32-node', GH_REPO_IOB='iobroker.metermaster';
-function loadInfo(){
-  fetch('/api/version').then(r=>r.json()).then(d=>{
-    document.getElementById('infoVer').textContent='v'+d.version+' (Build: '+d.build+')';
-    const ghUrl='https://github.com/'+GH_USER+'/'+GH_REPO_ESP;
-    document.getElementById('ghEspLink').href=ghUrl;
-    document.getElementById('ghEspLink').textContent=GH_USER+'/'+GH_REPO_ESP+' ↗';
-  }).catch(()=>{});
-}
-
-// ── GitHub Update Check (läuft im Browser → kein SSL-Problem am ESP) ─────────
-function checkUpdate(){
-  fetch('/api/version').then(r=>r.json()).then(d=>{
-    document.getElementById('otaFwCur').textContent='v'+d.version;
-    al('alOtaCheck','inf','Prüfe GitHub…');
-    const apiUrl='https://api.github.com/repos/'+GH_USER+'/'+GH_REPO_ESP+'/releases/latest';
-    fetch(apiUrl,{headers:{'Accept':'application/vnd.github.v3+json'}})
-      .then(r=>r.json()).then(rel=>{
-        const latest=(rel.tag_name||'').replace(/^v/,'');
-        document.getElementById('otaFwNew').textContent='v'+latest;
-        if(!latest){al('alOtaCheck','warn','Noch kein Release auf GitHub.');return;}
-        if(latest===d.version){
-          al('alOtaCheck','ok','✓ Firmware ist aktuell (v'+latest+').',5000);
-          document.getElementById('otaDlBtn').style.display='none';
-        } else {
-          al('alOtaCheck','warn','⬆ Neue Version v'+latest+' verfügbar! (installiert: v'+d.version+')');
-          // Link auf .bin Asset
-          const asset=(rel.assets||[]).find(a=>a.name.endsWith('.bin'));
-          const dlBtn=document.getElementById('otaDlBtn');
-          dlBtn.href=asset?asset.browser_download_url:rel.html_url;
-          dlBtn.style.display='';
-          dlBtn.textContent=asset?'⬇ Download .bin':'⬇ Release öffnen';
-        }
-      }).catch(()=>al('alOtaCheck','err','GitHub nicht erreichbar. (CORS-Block im Browser?)'));
-  });
-}
-
-// ── ioBroker Adapter Version ──────────────────────────────────────────────────
-function loadAdapterVersion(){
-  const url='https://api.github.com/repos/'+GH_USER+'/'+GH_REPO_IOB+'/releases/latest';
-  fetch(url,{headers:{'Accept':'application/vnd.github.v3+json'}})
-    .then(r=>r.json()).then(d=>{
-      const el=document.getElementById('adapterVerVal');
-      if(el) el.textContent=(d.tag_name||'–')+' auf GitHub';
-    }).catch(()=>{
-      const el=document.getElementById('adapterVerVal');
-      if(el) el.textContent='(GitHub nicht erreichbar)';
-    });
-}
-
-// ── Carousel ─────────────────────────────────────────────────────────────────
-let carEntries = [];
-
-function loadCarouselUI() {
-  fetch('/api/carousel').then(r=>r.json()).then(d=>{
-    document.getElementById('carOn').checked = d.active;
-    document.getElementById('carSec').value  = d.interval;
-    document.getElementById('carCurrent').textContent =
-      d.entries.length > 0 ? (d.entries[d.current]?.label||'–')+' ('+d.current+'/'+(d.entries.length-1)+')' : '–';
-    document.getElementById('carActive').textContent = d.active ? '✓ Aktiv' : '✗ Inaktiv';
-    document.getElementById('carCount').textContent  = d.entries.length+' / 5 Zähler';
-    carEntries = d.entries;
-    renderCarList();
-  }).catch(e=>al('alCar','err','Fehler: '+e));
-  fetch('/api/nodeinfo').then(r=>r.json()).then(d=>{
-    document.getElementById('carMac').textContent = d.mac;
-    document.getElementById('carStatePath').textContent = 'metermaster.0.nodes.'+d.mac;
-    document.getElementById('nodeNameIn').value = d.name||'';
-  }).catch(()=>{});
-}
-
-function renderCarList() {
-  const el = document.getElementById('carList');
-  if (carEntries.length === 0) {
-    el.innerHTML = '<div style="color:var(--mut);font-size:.8rem">Keine Zähler. Unten hinzufügen.</div>';
-    return;
-  }
-  el.innerHTML = carEntries.map((e,i) => `
-    <div class="ble-item" style="display:flex;align-items:center;gap:8px">
-      <div style="flex:1">
-        <div class="bn">${e.label||'(kein Label)'} <span style="font-size:.7rem;color:var(--mut)">${e.unit}</span></div>
-        <div class="ba">${e.sid}</div>
-      </div>
-      <div style="display:flex;flex-direction:column;gap:4px">
-        ${i>0?`<button class="btn sm sec" style="padding:3px 8px" onclick="carMoveUp(${i})">▲</button>`:'<div style="height:22px"></div>'}
-        ${i<carEntries.length-1?`<button class="btn sm sec" style="padding:3px 8px" onclick="carMoveDown(${i})">▼</button>`:''}
-      </div>
-      <button class="btn sm" style="background:linear-gradient(135deg,#991b1b,#ef4444);padding:4px 10px"
-              onclick="carRemove(${i})">✕</button>
-    </div>`).join('');
-}
-
-function carAdd() {
-  const sid = document.getElementById('carAddSid').value.trim();
-  const lbl = document.getElementById('carAddLbl').value.trim();
-  const unt = document.getElementById('carAddUnt').value.trim();
-  if (!sid) { al('alCar','err','State-ID fehlt.',2000); return; }
-  if (carEntries.length >= 5) { al('alCar','warn','Maximum 5 Zähler.',2000); return; }
-  carEntries.push({sid, label:lbl||sid.split('.').pop(), unit:unt});
-  document.getElementById('carAddSid').value='';
-  document.getElementById('carAddLbl').value='';
-  document.getElementById('carAddUnt').value='';
-  renderCarList();
-  document.getElementById('carCount').textContent = carEntries.length+' / 5 Zähler';
-}
-
-function carFromDiscover() {
-  const sel = document.getElementById('discSel');
-  if (!sel || sel.value==='') { al('alCar','warn','Zuerst in Einstellungen "Zähler laden" klicken.',3000); return; }
-  const idx = parseInt(sel.value);
-  if (isNaN(idx)||!discStates[idx]) return;
-  const s = discStates[idx];
-  document.getElementById('carAddSid').value = s.id;
-  const parts = s.label.split(' · ');
-  document.getElementById('carAddLbl').value = parts.length>=2?parts[parts.length-2]:s.label;
-  document.getElementById('carAddUnt').value = s.unit;
-}
-
-function carRemove(i) { carEntries.splice(i,1); renderCarList(); document.getElementById('carCount').textContent=carEntries.length+' / 5 Zähler'; }
-function carMoveUp(i) { if(i<1)return; [carEntries[i],carEntries[i-1]]=[carEntries[i-1],carEntries[i]]; renderCarList(); }
-function carMoveDown(i){ if(i>=carEntries.length-1)return; [carEntries[i],carEntries[i+1]]=[carEntries[i+1],carEntries[i]]; renderCarList(); }
-
-function carSave() {
-  const b = {
-    active: document.getElementById('carOn').checked,
-    interval: +document.getElementById('carSec').value,
-    entries: carEntries
-  };
-  fetch('/api/carousel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})
-    .then(r=>r.json()).then(d=>{
-      al('alCar',d.ok?'ok':'err',d.ok?'✓ Carousel gespeichert & aktiv.':'✗ '+d.msg,3000);
-      if(d.ok) loadCarouselUI();
-    });
-}
-
-function carNext() {
-  fetch('/api/carousel/next').then(r=>r.json()).then(d=>{
-    if(d.ok) { al('alCar','inf','→ '+d.label,1500); loadCarouselUI(); }
-  });
-}
-function carPrev() {
-  // kein eigener Endpoint – UI-seitig
-  al('alCar','inf','Tipp: Carousel blättert automatisch vorwärts.',2000);
-}
-
-function saveNodeName() {
-  const n = document.getElementById('nodeNameIn').value.trim();
-  if (!n) return;
-  fetch('/api/nodename?name='+encodeURIComponent(n))
-    .then(r=>r.json()).then(d=>al('alCar',d.ok?'ok':'err',d.ok?'✓ Name gespeichert.':'✗',2000));
-}
-
-// ── OTA ────────────────────────────────────────────────────────────────────────
 const char H_INFO[] PROGMEM = R"RAW(
 <div id="info" class="pg">
   <div class="card acc" style="text-align:center;padding:24px 16px">
@@ -1180,7 +1019,6 @@ const char H_OTA[] PROGMEM = R"RAW(
 </div>
 )RAW";
 
-// ── JavaScript ─────────────────────────────────────────────────────────────────
 const char H_JS[] PROGMEM = R"RAW(
 <script>
 const TABS=['db','cfg','wl','al','bt','car','ota','info'];
@@ -1258,12 +1096,12 @@ function oSelChange(){
 }
 function saveOled(){
   const sid=document.getElementById('oSel').value;
-  let stateId='';
-  try{stateId=JSON.parse(sid).id;}catch(e){stateId='';}
+  let stateId="";
+  try{stateId=JSON.parse(sid).id;}catch(e){stateId="";}
   if(!stateId){al('alOled','err','Bitte erst einen Zähler auswählen.');return;}
   const b={stateId:stateId,label:document.getElementById('oLbl').value,unit:document.getElementById('oUnt').value,oledStyle:curStyle};
   fetch('/api/oled',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})
-    .then(r=>r.json()).then(d=>al('alOled',d.ok?'ok':'err',d.ok?'✓ OLED aktualisiert & gespeichert.':'✗ '+d.msg,3000));
+    .then(r=>r.json()).then(d=>al('alOled',d.ok?"ok":"err",d.ok?'✓ OLED aktualisiert & gespeichert.':'✗ '+d.msg,3000));
 }
 
 // ── Einstellungen ─────────────────────────────────────────────────────────────
@@ -1286,7 +1124,7 @@ function saveCfg(){
            unit:document.getElementById('cUnt').value,
            interval:+document.getElementById('cInt').value};
   fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})
-    .then(r=>r.json()).then(d=>{al('alCfg',d.ok?'ok':'err',d.ok?'✓ Gespeichert.':'✗ '+d.msg,3000);});
+    .then(r=>r.json()).then(d=>{al('alCfg',d.ok?"ok":"err",d.ok?'✓ Gespeichert.':'✗ '+d.msg,3000);});
 }
 function testConn(){
   al('alCfg','inf','Verbinde…');
@@ -1294,7 +1132,7 @@ function testConn(){
            iobPort:+document.getElementById('cPort').value,
            stateId:document.getElementById('cSid').value};
   fetch('/api/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})
-    .then(r=>r.json()).then(d=>al('alCfg',d.ok?'ok':'err',d.ok?'✓ OK – Wert: '+parseFloat(d.value).toFixed(3):'✗ '+d.msg,4000));
+    .then(r=>r.json()).then(d=>al('alCfg',d.ok?"ok":"err",d.ok?'✓ OK – Wert: '+parseFloat(d.value).toFixed(3):'✗ '+d.msg,4000));
 }
 
 let discStatesCfg=[];
@@ -1310,7 +1148,7 @@ function discover(){
     const oSel=document.getElementById('oSel');
     oSel.innerHTML='<option value="">– Zähler wählen –</option>';
     d.states.forEach((s,i)=>{
-      const txt=s.label+' ('+parseFloat(s.val).toFixed(2)+(s.unit?' '+s.unit:'')+')';
+      const txt=s.label+' ('+parseFloat(s.val).toFixed(2)+(s.unit?' '+s.unit:"")+')';
       const val=JSON.stringify({id:s.id,label:s.label.split(' · ').slice(-2,-1)[0]||s.label,unit:s.unit});
       sel.add(new Option(txt,i));
       oSel.add(new Option(txt,val));
@@ -1321,18 +1159,18 @@ function discover(){
 }
 function discSelect(){
   const idx=document.getElementById('discSel').value;
-  if(idx==='')return;
+  if(idx==="")return;
   const s=discStatesCfg[parseInt(idx)];
   document.getElementById('cSid').value=s.id;
   const parts=s.label.split(' · ');
   document.getElementById('cLbl').value=parts.length>=2?parts[parts.length-2]:s.label;
   document.getElementById('cUnt').value=s.unit;
-  document.getElementById('discMeta').textContent='Wert: '+parseFloat(s.val).toFixed(3)+(s.unit?' '+s.unit:'');
+  document.getElementById('discMeta').textContent='Wert: '+parseFloat(s.val).toFixed(3)+(s.unit?' '+s.unit:"");
 }
 
 // ── WLAN ──────────────────────────────────────────────────────────────────────
 function fmtB(b){return b<1024?b+' B':b<1048576?(b/1024).toFixed(1)+' KB':(b/1048576).toFixed(1)+' MB';}
-function fmtUp(s){const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=s%60;return(h?h+'h ':'')+m+'m '+sec+'s';}
+function fmtUp(s){const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=s%60;return(h?h+"h ":"")+m+'m '+sec+'s';}
 function setSig(q){[25,50,75,100].forEach((l,i)=>document.getElementById('sb'+(i+1)).classList.toggle('on',q>=l));}
 function loadSys(){
   fetch('/api/sysinfo').then(r=>r.json()).then(d=>{
@@ -1376,7 +1214,7 @@ function saveAlarm(){
            alarmThreshold:+document.getElementById('alThr').value,
            alarmAbove:document.getElementById('alMode').value==='above'};
   fetch('/api/alarm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})
-    .then(r=>r.json()).then(d=>al('alAl',d.ok?'ok':'err',d.ok?'✓ Alarm gespeichert.':'✗ '+d.msg,3000));
+    .then(r=>r.json()).then(d=>al('alAl',d.ok?"ok":"err",d.ok?'✓ Alarm gespeichert.':'✗ '+d.msg,3000));
 }
 
 // ── Carousel ─────────────────────────────────────────────────────────────────
@@ -1396,31 +1234,37 @@ function loadCarouselUI() {
   fetch('/api/nodeinfo').then(r=>r.json()).then(d=>{
     document.getElementById('carMac').textContent = d.mac;
     document.getElementById('carStatePath').textContent = 'metermaster.0.nodes.'+d.mac;
-    document.getElementById('nodeNameIn').value = d.name||'';
+    document.getElementById('nodeNameIn').value = d.name||"";
   }).catch(()=>{});
 }
 
 function renderCarList() {
-  const el = document.getElementById('carList');
-  if (carEntries.length === 0) {
-    el.innerHTML = '<div style="color:var(--mut);font-size:.8rem">Keine Zähler. Unten hinzufügen.</div>';
+  var el = document.getElementById('carList');
+  if (!carEntries || carEntries.length === 0) {
+    el.innerHTML = '<div style="color:var(--mut);font-size:.8rem">Keine Zaehler. Unten hinzufuegen.</div>';
     return;
   }
-  el.innerHTML = carEntries.map((e,i) => `
-    <div class="ble-item" style="display:flex;align-items:center;gap:8px">
-      <div style="flex:1">
-        <div class="bn">${e.label||'(kein Label)'} <span style="font-size:.7rem;color:var(--mut)">${e.unit}</span></div>
-        <div class="ba">${e.sid}</div>
-      </div>
-      <div style="display:flex;flex-direction:column;gap:4px">
-        ${i>0?`<button class="btn sm sec" style="padding:3px 8px" onclick="carMoveUp(${i})">▲</button>`:'<div style="height:22px"></div>'}
-        ${i<carEntries.length-1?`<button class="btn sm sec" style="padding:3px 8px" onclick="carMoveDown(${i})">▼</button>`:''}
-      </div>
-      <button class="btn sm" style="background:linear-gradient(135deg,#991b1b,#ef4444);padding:4px 10px"
-              onclick="carRemove(${i})">✕</button>
-    </div>`).join('');
+  var html="";
+  for(var i=0;i<carEntries.length;i++){
+    var e=carEntries[i];
+    html += '<div class="ble-item" style="display:flex;align-items:center;gap:8px">';
+    html += '<div style="flex:1"><div class="bn">'+(e.label||'(kein Label)')+
+            ' <span style="font-size:.7rem;color:var(--mut)">'+e.unit+'</span></div>';
+    html += '<div class="ba">'+e.sid+'</div></div>';
+    html += '<div style="display:flex;flex-direction:column;gap:4px">';
+    if(i>0)
+      html += '<button class="btn sm sec" style="padding:3px 8px" onclick="carMoveUp('+i+')">&#x25B2;</button>';
+    else
+      html += '<div style="height:22px"></div>';
+    if(i<carEntries.length-1)
+      html += '<button class="btn sm sec" style="padding:3px 8px" onclick="carMoveDown('+i+')">&#x25BC;</button>';
+    html += '</div>';
+    html += '<button class="btn sm" style="background:linear-gradient(135deg,#991b1b,#ef4444);padding:4px 10px"'
+          + ' onclick="carRemove('+i+')">&times;</button>';
+    html += '</div>';
+  }
+  el.innerHTML = html;
 }
-
 function carAdd() {
   const sid = document.getElementById('carAddSid').value.trim();
   const lbl = document.getElementById('carAddLbl').value.trim();
@@ -1428,16 +1272,16 @@ function carAdd() {
   if (!sid) { al('alCar','err','State-ID fehlt.',2000); return; }
   if (carEntries.length >= 5) { al('alCar','warn','Maximum 5 Zähler.',2000); return; }
   carEntries.push({sid, label:lbl||sid.split('.').pop(), unit:unt});
-  document.getElementById('carAddSid').value='';
-  document.getElementById('carAddLbl').value='';
-  document.getElementById('carAddUnt').value='';
+  document.getElementById('carAddSid').value="";
+  document.getElementById('carAddLbl').value="";
+  document.getElementById('carAddUnt').value="";
   renderCarList();
   document.getElementById('carCount').textContent = carEntries.length+' / 5 Zähler';
 }
 
 function carFromDiscover() {
   const sel = document.getElementById('discSel');
-  if (!sel || sel.value==='') { al('alCar','warn','Zuerst in Einstellungen "Zähler laden" klicken.',3000); return; }
+  if (!sel || sel.value==="") { al('alCar','warn','Zuerst in Einstellungen "Zähler laden" klicken.',3000); return; }
   const idx = parseInt(sel.value);
   if (isNaN(idx)||!discStates[idx]) return;
   const s = discStates[idx];
@@ -1448,8 +1292,8 @@ function carFromDiscover() {
 }
 
 function carRemove(i) { carEntries.splice(i,1); renderCarList(); document.getElementById('carCount').textContent=carEntries.length+' / 5 Zähler'; }
-function carMoveUp(i) { if(i<1)return; [carEntries[i],carEntries[i-1]]=[carEntries[i-1],carEntries[i]]; renderCarList(); }
-function carMoveDown(i){ if(i>=carEntries.length-1)return; [carEntries[i],carEntries[i+1]]=[carEntries[i+1],carEntries[i]]; renderCarList(); }
+function carMoveUp(i) { if(i<1)return; var _t=carEntries[i]; carEntries[i]=carEntries[i-1]; carEntries[i-1]=_t;; renderCarList(); }
+function carMoveDown(i){ if(i>=carEntries.length-1)return; var _t=carEntries[i]; carEntries[i]=carEntries[i+1]; carEntries[i+1]=_t;; renderCarList(); }
 
 function carSave() {
   const b = {
@@ -1459,7 +1303,7 @@ function carSave() {
   };
   fetch('/api/carousel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})
     .then(r=>r.json()).then(d=>{
-      al('alCar',d.ok?'ok':'err',d.ok?'✓ Carousel gespeichert & aktiv.':'✗ '+d.msg,3000);
+      al('alCar',d.ok?"ok":"err",d.ok?'✓ Carousel gespeichert & aktiv.':'✗ '+d.msg,3000);
       if(d.ok) loadCarouselUI();
     });
 }
@@ -1478,7 +1322,7 @@ function saveNodeName() {
   const n = document.getElementById('nodeNameIn').value.trim();
   if (!n) return;
   fetch('/api/nodename?name='+encodeURIComponent(n))
-    .then(r=>r.json()).then(d=>al('alCar',d.ok?'ok':'err',d.ok?'✓ Name gespeichert.':'✗',2000));
+    .then(r=>r.json()).then(d=>al('alCar',d.ok?"ok":"err",d.ok?'✓ Name gespeichert.':'✗',2000));
 }
 
 // ── OTA ───────────────────────────────────────────────────────────────────────
@@ -1505,6 +1349,7 @@ window.onload=()=>{refreshDash();loadCfg();};
 </script></body></html>
 )RAW";
 
+
 String buildPage() {
   String h; h.reserve(18000);
   h += FPSTR(H_HEAD); h += FPSTR(H_DB);   h += FPSTR(H_CFG);
@@ -1519,11 +1364,12 @@ String buildPage() {
 // ─────────────────────────────────────────────────────────────────────────────
 void hApiVersion() {
   server.send(200,"application/json",
-    "{"version":"" + String(FW_VERSION) + "","
-    ""build":"" + String(__DATE__) + " " + String(__TIME__) + "","
-    ""ghUser":"" + String(GH_USER) + "","
-    ""ghRepoEsp":"" + String(GH_REPO_ESP) + "","
-    ""ghRepoIob":"" + String(GH_REPO_IOB) + ""}");
+    String("{") +
+    "\"version\":\"" + String(FW_VERSION) + "\"," +
+    "\"build\":\"" + String(__DATE__) + " " + String(__TIME__) + "\"," +
+    "\"ghUser\":\"" + String(GH_USER) + "\"," +
+    "\"ghRepoEsp\":\"" + String(GH_REPO_ESP) + "\"," +
+    "\"ghRepoIob\":\"" + String(GH_REPO_IOB) + "\"}");
 }
 
 
@@ -1534,51 +1380,52 @@ void hApiNodeinfo() {
   String carArr = "[";
   for (int i = 0; i < carouselCount; i++) {
     if (i) carArr += ",";
-    carArr += "{"sid":"" + carousel[i].sid + """
-            + ","label":"" + carousel[i].label + """
-            + ","unit":"" + carousel[i].unit + """
-            + ","val":" + String(carousel[i].val, 3)
-            + ","ok":" + String(carousel[i].ok?"true":"false") + "}";
+    carArr += String("{\"sid\":\"") + carousel[i].sid + "\""
+            + ",\"label\":\"" + carousel[i].label + "\""
+            + ",\"unit\":\"" + carousel[i].unit + "\""
+            + ",\"val\":" + String(carousel[i].val, 3)
+            + ",\"ok\":" + String(carousel[i].ok?"true":"false") + "}";
   }
   carArr += "]";
   server.send(200,"application/json",
-    "{"mac":""          + nodeMac                             + "","
-    ""name":""          + nodeName                           + "","
-    ""version":""       + FW_VERSION                         + "","
-    ""ip":""            + WiFi.localIP().toString()          + "","
-    ""uptime":"          + String(millis()/1000)              + ","
-    ""rssi":"            + String(WiFi.RSSI())                + ","
-    ""stateId":""       + stateId                           + "","
-    ""label":""         + meterLabel                        + "","
-    ""unit":""          + meterUnit                         + "","
-    ""value":"           + String(currentValue,4)            + ","
-    ""fetchOk":"         + String(fetchOk?"true":"false")    + ","
-    ""carouselActive":"  + String(carouselActive?"true":"false") + ","
-    ""carouselIdx":"     + String(carouselIdx)               + ","
-    ""carouselSec":"     + String(carouselSec)               + ","
-    ""carousel":"        + carArr                            + "}");
+    String("{") +
+    "\"mac\":\"" + nodeMac + "\"," +
+    "\"name\":\"" + nodeName + "\"," +
+    "\"version\":\"" + FW_VERSION + "\"," +
+    "\"ip\":\"" + WiFi.localIP().toString() + "\"," +
+    "\"uptime\":" + String(millis()/1000) + "," +
+    "\"rssi\":" + String(WiFi.RSSI()) + "," +
+    "\"stateId\":\"" + stateId + "\"," +
+    "\"label\":\"" + meterLabel + "\"," +
+    "\"unit\":\"" + meterUnit + "\"," +
+    "\"value\":" + String(currentValue,4) + "," +
+    "\"fetchOk\":" + String(fetchOk?"true":"false") + "," +
+    "\"carouselActive\":" + String(carouselActive?"true":"false") + "," +
+    "\"carouselIdx\":" + String(carouselIdx) + "," +
+    "\"carouselSec\":" + String(carouselSec) + "," +
+    "\"carousel\":" + carArr + "}");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  /api/carousel  GET+POST
 // ─────────────────────────────────────────────────────────────────────────────
 void hApiCarouselGet() {
-  String r = "{"active":" + String(carouselActive?"true":"false")
-           + ","interval":" + String(carouselSec)
-           + ","current":" + String(carouselIdx)
-           + ","entries":[";
+  String r = String("{\"active\":") + String(carouselActive?"true":"false")
+           + ",\"interval\":" + String(carouselSec)
+           + ",\"current\":" + String(carouselIdx)
+           + ",\"entries\":[";
   for (int i = 0; i < carouselCount; i++) {
     if (i) r += ",";
-    r += "{"sid":""+carousel[i].sid+"","label":""+carousel[i].label+"","unit":""+carousel[i].unit+""}";
+    r += String("{\"sid\":\"") + carousel[i].sid + "\",\"label\":\"" + carousel[i].label + "\",\"unit\":\"" + carousel[i].unit + "\"}";
   }
   r += "]}";
   server.send(200,"application/json",r);
 }
 
 void hApiCarouselPost() {
-  if (!server.hasArg("plain")) { server.send(400,"application/json","{"ok":false}"); return; }
+  if (!server.hasArg("plain")) { server.send(400,"application/json",String("{\"ok\":false}")); return; }
   DynamicJsonDocument doc(1024);
-  if (deserializeJson(doc,server.arg("plain"))) { server.send(400,"application/json","{"ok":false,"msg":"JSON"}"); return; }
+  if (deserializeJson(doc,server.arg("plain"))) { server.send(400,"application/json","{\"ok\":false,\"msg\":\"JSON\"}"); return; }
   if (!doc["active"].isNull()) carouselActive = doc["active"].as<bool>();
   if (!doc["interval"].isNull()) carouselSec = max(3, doc["interval"].as<int>());
   if (doc["entries"].is<JsonArray>()) {
@@ -1593,18 +1440,18 @@ void hApiCarouselPost() {
     }
   }
   saveCarousel(); lastFetch = 0; lastCarousel = millis();
-  server.send(200,"application/json","{"ok":true}");
+  server.send(200,"application/json",String("{\"ok\":true}")); 
 }
 
 void hApiCarouselNext() {
   carouselNext();
   server.send(200,"application/json",
-    "{"ok":true,"idx":"+String(carouselIdx)+","label":""+meterLabel+""}");
+    String("{\"ok\":true,\"idx\":") + String(carouselIdx) + ",\"label\":\"" + meterLabel + "\"}");
 }
 
 void hApiNodeName() {
   if (server.hasArg("name")) { nodeName = server.arg("name"); }
-  server.send(200,"application/json","{"ok":true,"name":""+nodeName+""}");
+  server.send(200,"application/json",String("{\"ok\":true,\"name\":\"") + nodeName + String("\"}"));
 }
 
 void hRoot() { server.send(200,"text/html",buildPage()); }
