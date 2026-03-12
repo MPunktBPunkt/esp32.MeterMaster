@@ -1,13 +1,12 @@
 /*
  * ============================================================
- *  MeterMaster ESP32 Display Node  –  v0.2.0
+ *  MeterMaster ESP32 Display Node  –  v0.3.0
  *  Hardware: ESP32 D1 Mini + 64×48 OLED (SSD1306, I²C)
  * ============================================================
  *
  *  Libraries (Arduino Library Manager):
  *    - WiFiManager          by tzapu       >= 2.0.17
- *    - Adafruit SSD1306     by Adafruit    >= 2.5
- *    - Adafruit GFX Library by Adafruit    >= 1.11
+ *    - U8g2                 by olikraus    >= 2.34
  *    - ArduinoJson          by Blanchon    >= 6.21
  *
  *  NEU in v1.5:
@@ -26,11 +25,10 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <Wire.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
+#include <U8g2lib.h>
 #include <time.h>
 // ── Hardware ──────────────────────────────────────────────────────────────────
-#define FW_VERSION  "0.2.0"
+#define FW_VERSION  "0.3.0"
 #define GH_USER     "MPunktBPunkt"
 #define GH_REPO_ESP "esp32.MeterMaster"
 #define GH_REPO_IOB "iobroker.metermaster"
@@ -47,7 +45,8 @@
 #define TZ_OFFSET   3600     // UTC+1 Winter
 #define DST_OFFSET  3600     // Sommerzeit +1h (automatisch)
 
-Adafruit_SSD1306 oled(SCREEN_W, SCREEN_H, &Wire, -1);
+// U8g2: spezifischer Konstruktor für EastRising 0.66" 64×48 OLED (SSD1306)
+U8G2_SSD1306_64X48_ER_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE);
 WebServer server(80);
 Preferences prefs;
 
@@ -124,28 +123,39 @@ void formatTs(long long tsMs) {
 // ─────────────────────────────────────────────────────────────────────────────
 //  OLED  (64×48 – textSize 1 = 6×8px, 10 Zeichen × 6 Zeilen)
 //
-//  Layout:
-//    y= 0..7  Zeile 1: Label
-//    y= 9     Trennlinie
-//    y=11..18 Zeile 2: Wert (zentriert)
-//    y=20..27 Zeile 3: Einheit
-//    y=29..36 Zeile 4: Uhrzeit
-//    y=38..45 Zeile 5: Datum  +  Status-Punkt rechts (y=42)
+//  Layout (U8g2, Baseline-Koordinaten):
+//    y= 6   Zeile 1: Label         (u8g2_font_5x7_tr)
+//    y= 8   Trennlinie
+//    y=19   Zeile 2: Wert          (u8g2_font_7x13_tr oder 10x20)
+//    y=29   Zeile 3: Einheit       (u8g2_font_5x7_tr)
+//    y=37   Zeile 4: Uhrzeit       (u8g2_font_baby_tf)
+//    y=45   Zeile 5: Datum         (u8g2_font_baby_tf)  + Dot (61,42)
 // ─────────────────────────────────────────────────────────────────────────────
+
+// Hilfsfunktion: String zentriert auf dem 64px breiten Display ausgeben.
+void u8drawCenter(const char* s, uint8_t y) {
+  uint8_t w = u8g2.getStrWidth(s);
+  uint8_t x = (w < 64) ? (64 - w) / 2 : 0;
+  u8g2.drawStr(x, y, s);
+}
+
+// Statusindikator: ausgefüllter Kreis = OK, Kreis = Fehler.
+void u8dot(bool ok) {
+  if (ok) u8g2.drawBox(60, 43, 4, 4);
+  else    u8g2.drawFrame(60, 43, 4, 4);
+}
+
+// Zeigt einfache 3-Zeilen-Meldung (Startmeldungen, OTA-Status, WLAN-Setup).
 void oledClear(const char* l1="", const char* l2="", const char* l3="") {
-  oled.clearDisplay();
-  oled.setTextSize(1);
-  oled.setTextColor(SSD1306_WHITE);
-  oled.setCursor(0,  0); oled.print(l1);
-  oled.setCursor(0, 18); oled.print(l2);
-  oled.setCursor(0, 34); oled.print(l3);
-  oled.display();
+  u8g2.clearBuffer();
+  u8g2.setFont(u8g2_font_5x7_tr);
+  u8g2.drawStr(0,  8, l1);
+  u8g2.drawStr(0, 22, l2);
+  u8g2.drawStr(0, 36, l3);
+  u8g2.sendBuffer();
 }
 
 void oledValue() {
-  oled.clearDisplay();
-  oled.setTextColor(SSD1306_WHITE);
-
   // Wert-String aufbereiten
   String v;
   if      (currentValue >= 10000) v = String((long)currentValue);
@@ -153,75 +163,72 @@ void oledValue() {
   else if (currentValue >= 100)   v = String(currentValue, 1);
   else                            v = String(currentValue, 2);
 
+  u8g2.clearBuffer();
+
   if (oledStyle == 1) {
-    // ── Stil 1: GROSS – Wert mit textSize 2, kein Datum ──────────────────────
-    oled.setTextSize(1);
-    String lbl = meterLabel; if(lbl.length()>9) lbl=lbl.substring(0,9);
-    oled.setCursor(0,0); oled.print(lbl);
-    oled.drawLine(0,9,63,9,SSD1306_WHITE);
-    // Wert textSize 2 wenn kurz genug
-    uint8_t ts = (v.length()<=4) ? 2 : 1;
-    oled.setTextSize(ts);
-    int16_t bx,by; uint16_t bw,bh;
-    oled.getTextBounds(v.c_str(),0,0,&bx,&by,&bw,&bh);
-    oled.setCursor(max(0,(int)(64-(int)bw)/2), (ts==2)?12:18);
-    oled.print(v);
-    oled.setTextSize(1);
-    oled.setCursor(0,40); oled.print(meterUnit);
-    oled.setCursor(0,40+8); // no space, skip
-    if(fetchOk) oled.fillCircle(61,42,3,SSD1306_WHITE);
-    else        oled.drawCircle(61,42,3,SSD1306_WHITE);
+    // ── Stil 1: GROSS – Label + großer Wert + Einheit ────────────────────────
+    String lbl = meterLabel; if (lbl.length() > 10) lbl = lbl.substring(0, 10);
+    u8g2.setFont(u8g2_font_5x7_tr);
+    u8g2.drawStr(0, 7, lbl.c_str());
+    u8g2.drawHLine(0, 9, 64);
+    // Wert: 10x20 wenn <= 5 Zeichen, sonst 7x13
+    if (v.length() <= 5) {
+      u8g2.setFont(u8g2_font_10x20_tr);
+      u8drawCenter(v.c_str(), 33);
+    } else {
+      u8g2.setFont(u8g2_font_7x13_tr);
+      u8drawCenter(v.c_str(), 26);
+    }
+    u8g2.setFont(u8g2_font_5x7_tr);
+    u8g2.drawStr(0, 45, meterUnit.c_str());
+    u8dot(fetchOk);
 
   } else if (oledStyle == 2) {
-    // ── Stil 2: MINIMAL – nur Wert + Einheit zentriert ───────────────────────
-    oled.setTextSize(1);
-    int16_t bx,by; uint16_t bw,bh;
-    oled.getTextBounds(v.c_str(),0,0,&bx,&by,&bw,&bh);
-    oled.setCursor(max(0,(int)(64-(int)bw)/2),14);
-    oled.print(v);
-    String u = meterUnit; if(u.length()>4)u=u.substring(0,4);
-    oled.getTextBounds(u.c_str(),0,0,&bx,&by,&bw,&bh);
-    oled.setCursor(max(0,(int)(64-(int)bw)/2),26);
-    oled.print(u);
-    if(fetchOk) oled.fillCircle(61,42,3,SSD1306_WHITE);
-    else        oled.drawCircle(61,42,3,SSD1306_WHITE);
+    // ── Stil 2: MINIMAL – nur Wert + Einheit, alles zentriert ────────────────
+    u8g2.setFont(u8g2_font_7x13_tr);
+    u8drawCenter(v.c_str(), 22);
+    u8g2.setFont(u8g2_font_5x7_tr);
+    String u = meterUnit; if (u.length() > 5) u = u.substring(0, 5);
+    u8drawCenter(u.c_str(), 35);
+    u8dot(fetchOk);
 
   } else if (oledStyle == 3) {
-    // ── Stil 3: INVERTIERT – weißer Hintergrund ──────────────────────────────
-    oled.fillRect(0,0,64,48,SSD1306_WHITE);
-    oled.setTextColor(SSD1306_BLACK);
-    oled.setTextSize(1);
-    String lbl = meterLabel; if(lbl.length()>9) lbl=lbl.substring(0,9);
-    oled.setCursor(0,0); oled.print(lbl);
-    oled.drawLine(0,9,63,9,SSD1306_BLACK);
-    int16_t bx,by; uint16_t bw,bh;
-    oled.getTextBounds(v.c_str(),0,0,&bx,&by,&bw,&bh);
-    oled.setCursor(max(0,(int)(64-(int)bw)/2),12);
-    oled.print(v);
-    oled.setCursor(0,24); oled.print(meterUnit);
-    oled.setCursor(0,33); oled.print(lastReadingTime);
-    oled.setCursor(0,42); oled.print(lastReadingDate);
-    // Alarm
-    if(alarmActive){oled.setCursor(36,42);oled.print("!ALM");}
+    // ── Stil 3: INVERTIERT – weißer Hintergrund, schwarzer Text ─────────────
+    u8g2.setDrawColor(1);
+    u8g2.drawBox(0, 0, 64, 48);           // weißes Rechteck
+    u8g2.setDrawColor(0);                 // schwarze Schrift
+    String lbl = meterLabel; if (lbl.length() > 10) lbl = lbl.substring(0, 10);
+    u8g2.setFont(u8g2_font_5x7_tr);
+    u8g2.drawStr(0, 7, lbl.c_str());
+    u8g2.drawHLine(0, 9, 64);
+    u8g2.setFont(u8g2_font_7x13_tr);
+    u8drawCenter(v.c_str(), 25);
+    u8g2.setFont(u8g2_font_baby_tf);
+    u8g2.drawStr(0, 34, meterUnit.c_str());
+    u8g2.drawStr(0, 41, lastReadingTime.c_str());
+    u8g2.drawStr(0, 47, lastReadingDate.c_str());
+    if (alarmActive) { u8g2.drawStr(36, 47, "!ALM"); }
+    u8g2.setDrawColor(1);                 // zurücksetzen
 
   } else {
     // ── Stil 0: STANDARD ─────────────────────────────────────────────────────
-    oled.setTextSize(1);
-    String lbl = meterLabel; if(lbl.length()>9) lbl=lbl.substring(0,9);
-    oled.setCursor(0,0); oled.print(lbl);
-    oled.drawLine(0,9,63,9,SSD1306_WHITE);
-    int vx = max(0,(64-(int)v.length()*6)/2);
-    oled.setCursor(vx,11); oled.print(v);
-    String unit = meterUnit; if(unit.length()>4) unit=unit.substring(0,4);
-    oled.setCursor(0,21); oled.print(unit);
-    if(alarmActive){oled.setCursor(36,21);oled.print("!ALM");}
-    oled.setCursor(0,30); oled.print(lastReadingTime);
-    oled.setCursor(0,39); oled.print(lastReadingDate);
-    if(fetchOk) oled.fillCircle(61,42,3,SSD1306_WHITE);
-    else        oled.drawCircle(61,42,3,SSD1306_WHITE);
+    String lbl = meterLabel; if (lbl.length() > 10) lbl = lbl.substring(0, 10);
+    u8g2.setFont(u8g2_font_5x7_tr);
+    u8g2.drawStr(0, 7, lbl.c_str());
+    u8g2.drawHLine(0, 9, 64);
+    u8g2.setFont(u8g2_font_7x13_tr);
+    u8drawCenter(v.c_str(), 24);
+    u8g2.setFont(u8g2_font_5x7_tr);
+    String unit = meterUnit; if (unit.length() > 5) unit = unit.substring(0, 5);
+    u8g2.drawStr(0, 33, unit.c_str());
+    if (alarmActive) { u8g2.drawStr(30, 33, "!ALM"); }
+    u8g2.setFont(u8g2_font_baby_tf);
+    u8g2.drawStr(0, 40, lastReadingTime.c_str());
+    u8g2.drawStr(0, 47, lastReadingDate.c_str());
+    u8dot(fetchOk);
   }
 
-  oled.display();
+  u8g2.sendBuffer();
 }
 
 
@@ -899,7 +906,7 @@ const char H_INFO[] PROGMEM = R"RAW(
   </div>
   <div class="card">
     <div class="h2"><i>📝</i>Changelog</div>
-    <div class="irow"><span class="ik">v0.2.0</span><span class="iv" style="font-size:.75rem;text-align:right">Carousel, Node-Reg.,<br>Debug-Tab, Bugfixes</span></div>
+    <div class="irow"><span class="ik">v0.3.0</span><span class="iv" style="font-size:.75rem;text-align:right">Carousel, Node-Reg.,<br>Debug-Tab, Bugfixes</span></div>
     <div class="irow"><span class="ik">v0.1.4</span><span class="iv" style="font-size:.75rem;text-align:right">Info-Tab, GitHub OTA,<br>OLED-Stile, Adapter-Version</span></div>
     <div class="irow"><span class="ik">v0.1.3</span><span class="iv" style="font-size:.75rem;text-align:right">Alarm-Tab, Bluetooth-Tab,<br>Discover im Einstellungen-Tab</span></div>
     <div class="irow"><span class="ik">v0.1.2</span><span class="iv" style="font-size:.75rem;text-align:right">NTP-Zeit, WLAN-Tab,<br>LED-Steuerung, Lila Theme</span></div>
@@ -1019,20 +1026,44 @@ const char H_CAR[] PROGMEM = R"RAW(
 const char H_OTA[] PROGMEM = R"RAW(
 <div id="ota" class="pg">
   <div class="card acc">
-    <div class="h2"><i>🔍</i>Auf Updates prüfen</div>
-    <div class="g2">
+    <div class="h2"><i>🚀</i>GitHub Release wählen</div>
+    <div class="g2" style="margin-bottom:10px">
       <div class="cell"><div class="k">Installiert</div><div class="v" id="otaFwCur">–</div></div>
-      <div class="cell"><div class="k">GitHub (aktuell)</div><div class="v" id="otaFwNew">–</div></div>
+      <div class="cell"><div class="k">Neuestes Release</div><div class="v" id="otaFwNew">–</div></div>
+    </div>
+    <div style="margin-bottom:10px">
+      <label style="font-size:.78rem;color:var(--mut);display:block;margin-bottom:5px">Version wählen</label>
+      <div style="display:flex;gap:7px">
+        <select id="relSel" onchange="relSelect()" style="flex:1;background:var(--card2);color:var(--fg);border:1px solid var(--brd);
+                border-radius:8px;padding:8px 10px;font-size:.85rem">
+          <option value="">– Releases laden –</option>
+        </select>
+        <button class="btn sec" style="margin-top:0;padding:0 14px" onclick="loadReleases()">🔄</button>
+      </div>
+    </div>
+    <div id="relInfo" style="display:none;background:var(--card2);border:1px solid var(--brd);border-radius:8px;
+         padding:10px 12px;font-size:.78rem;margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+        <span id="relName" style="font-weight:700;color:var(--p2)"></span>
+        <span id="relDate" style="color:var(--mut)"></span>
+      </div>
+      <div id="relAsset" style="color:var(--mut)"></div>
     </div>
     <div id="alOtaCheck" class="al"></div>
-    <div style="display:flex;gap:7px;margin-top:10px">
-      <button class="btn sec" style="margin-top:0;flex:1" onclick="checkUpdate()">🔍 Prüfen</button>
-      <a id="otaDlBtn" class="btn" style="margin-top:0;flex:1;text-decoration:none;display:none;text-align:center"
-         href="#" target="_blank">⬇ Download .bin</a>
+    <div style="display:flex;gap:7px;margin-top:8px">
+      <button id="otaFlashBtn" class="btn" style="margin-top:0;flex:1;display:none"
+              onclick="flashFromGitHub()">⚡ Flash via OTA</button>
+      <a id="otaDlBtn" class="btn sec" style="margin-top:0;flex:1;text-decoration:none;display:none;text-align:center"
+         href="#" target="_blank">⬇ .bin herunterladen</a>
+    </div>
+    <div id="otaFlashProgress" style="display:none;margin-top:10px">
+      <div style="font-size:.78rem;color:var(--mut);margin-bottom:5px">
+        ⚠ Der ESP32 lädt die .bin von GitHub und installiert sie. Browser bleibt offen.</div>
+      <div class="pb show" style="display:block!important"><div class="pbi" id="piGh" style="width:0%;animation:prog 30s linear forwards"></div></div>
     </div>
   </div>
   <div class="card">
-    <div class="h2"><i>📦</i>Manuelles Update</div>
+    <div class="h2"><i>📦</i>Lokales Update (.bin)</div>
     <div id="alOta" class="al"></div>
     <div class="drop" id="dropZ" onclick="document.getElementById('fIn').click()"
          ondragover="evD(event,true)" ondragleave="evD(event,false)" ondrop="drpD(event)">
@@ -1109,6 +1140,7 @@ function tab(id){
   if(id==='al') loadAlarmUI();
   if(id==='info') loadInfo();
   if(id==='dbg')  loadLog();
+  if(id==='ota')   loadReleases();
   if(id==='car')  loadCarouselUI();
 }
 
@@ -1498,30 +1530,132 @@ function loadInfo() {
   }).catch(function(){});
 }
 
-function checkUpdate() {
+// Gespeicherte Releases-Liste und aktuelle Firmware-Version
+var ghReleases = [];
+var curFwVer = '';
+var selBinUrl = '';
+
+// Wird beim Öffnen des OTA-Tabs und manuell aufgerufen
+function loadReleases() {
+  al('alOtaCheck', 'inf', 'Lade Releases von GitHub…');
+  document.getElementById('relSel').innerHTML = '<option value="">Lade…</option>';
+  document.getElementById('relInfo').style.display = 'none';
+  document.getElementById('otaFlashBtn').style.display = 'none';
+  document.getElementById('otaDlBtn').style.display = 'none';
+
+  // Firmware-Version vom ESP32 holen
   fetch('/api/version').then(r=>r.json()).then(function(d){
-    document.getElementById('otaFwCur').textContent = 'v' + d.version;
-    al('alOtaCheck', 'inf', 'Prüfe GitHub…');
-    fetch('https://api.github.com/repos/' + GH_U + '/' + GH_E + '/releases/latest',
+    curFwVer = d.version;
+    document.getElementById('otaFwCur').textContent = 'v' + curFwVer;
+    document.getElementById('otaIp').textContent = d.ip || location.hostname;
+
+    // Alle Releases von GitHub laden (max. 20)
+    fetch('https://api.github.com/repos/' + GH_U + '/' + GH_E + '/releases?per_page=20',
       {headers: {'Accept': 'application/vnd.github.v3+json'}})
-    .then(r=>r.json()).then(function(rel){
-      var latest = (rel.tag_name || '').replace(/^v/, '');
-      document.getElementById('otaFwNew').textContent = 'v' + latest;
-      if (!latest) { al('alOtaCheck','warn','Noch kein Release auf GitHub.'); return; }
-      if (latest === d.version) {
-        al('alOtaCheck', 'ok', '✓ Firmware ist aktuell (v' + latest + ').', 5000);
-        document.getElementById('otaDlBtn').style.display = 'none';
-      } else {
-        al('alOtaCheck', 'warn', '⬆ Neue Version v' + latest + ' verfügbar!');
-        var asset = (rel.assets || []).find(function(a){ return a.name.endsWith('.bin'); });
-        var btn = document.getElementById('otaDlBtn');
-        btn.href = asset ? asset.browser_download_url : rel.html_url;
-        btn.style.display = '';
-        btn.textContent = asset ? '⬇ Download .bin' : '⬇ Release öffnen';
+    .then(r=>r.json()).then(function(releases){
+      if (!releases || !releases.length) {
+        al('alOtaCheck','warn','Keine Releases auf GitHub gefunden.');
+        document.getElementById('relSel').innerHTML = '<option value="">Keine Releases</option>';
+        return;
       }
+      ghReleases = releases;
+      var latest = (releases[0].tag_name || '').replace(/^v/,'');
+      document.getElementById('otaFwNew').textContent = 'v' + latest;
+
+      // Dropdown befüllen
+      var sel = document.getElementById('relSel');
+      sel.innerHTML = '';
+      releases.forEach(function(rel, i) {
+        var ver = (rel.tag_name || '').replace(/^v/,'');
+        var hasBin = (rel.assets||[]).some(function(a){return a.name.endsWith('.bin');});
+        var label = rel.tag_name + (i===0?' (neueste)':'') + (ver===curFwVer?' ← installiert':'') + (!hasBin?' [kein .bin]':'');
+        var opt = document.createElement('option');
+        opt.value = i;
+        opt.textContent = label;
+        if (ver === curFwVer) opt.style.color = '#a78bfa';
+        sel.appendChild(opt);
+      });
+
+      // Vergleich installiert vs. neueste
+      if (latest === curFwVer) {
+        al('alOtaCheck','ok','✓ Firmware ist aktuell (v' + latest + ').', 5000);
+      } else {
+        al('alOtaCheck','warn','⬆ Neue Version v' + latest + ' verfügbar!');
+      }
+
+      // Ersten Eintrag direkt anzeigen
+      relSelect();
     }).catch(function(){ al('alOtaCheck','err','GitHub nicht erreichbar.'); });
+  }).catch(function(){ al('alOtaCheck','err','ESP32 nicht erreichbar.'); });
+}
+
+// Wird bei Änderung der Dropdown-Auswahl aufgerufen
+function relSelect() {
+  var idx = parseInt(document.getElementById('relSel').value);
+  if (isNaN(idx) || !ghReleases[idx]) {
+    document.getElementById('relInfo').style.display = 'none';
+    document.getElementById('otaFlashBtn').style.display = 'none';
+    document.getElementById('otaDlBtn').style.display = 'none';
+    return;
+  }
+  var rel = ghReleases[idx];
+  var asset = (rel.assets||[]).find(function(a){return a.name.endsWith('.bin');});
+  selBinUrl = asset ? asset.browser_download_url : '';
+
+  // Release-Info anzeigen
+  document.getElementById('relInfo').style.display = '';
+  document.getElementById('relName').textContent = rel.tag_name + (rel.name && rel.name !== rel.tag_name ? ' – ' + rel.name : '');
+  var d = new Date(rel.published_at);
+  document.getElementById('relDate').textContent = d.toLocaleDateString('de-DE');
+  document.getElementById('relAsset').textContent = asset ? ('📁 ' + asset.name + ' (' + (asset.size/1024).toFixed(0) + ' KB)') : '⚠ Kein .bin Asset in diesem Release';
+
+  // Buttons
+  if (selBinUrl) {
+    document.getElementById('otaFlashBtn').style.display = '';
+    document.getElementById('otaDlBtn').style.display = '';
+    document.getElementById('otaDlBtn').href = selBinUrl;
+  } else {
+    document.getElementById('otaFlashBtn').style.display = 'none';
+    document.getElementById('otaDlBtn').style.display = 'none';
+  }
+}
+
+// Flasht die gewählte Version direkt per OTA vom GitHub-Download
+function flashFromGitHub() {
+  if (!selBinUrl) { al('alOtaCheck','err','Kein .bin ausgewählt.'); return; }
+  var idx = parseInt(document.getElementById('relSel').value);
+  var ver = ghReleases[idx] ? (ghReleases[idx].tag_name||'') : '?';
+  if (!confirm('Firmware ' + ver + ' jetzt flashen?\nDer ESP32 startet danach neu.')) return;
+
+  al('alOtaCheck','inf','⚡ Sende Flash-Auftrag an ESP32…');
+  document.getElementById('otaFlashProgress').style.display = '';
+  document.getElementById('otaFlashBtn').disabled = true;
+
+  fetch('/api/ota-github', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({url: selBinUrl, version: ver})
+  }).then(r=>r.json()).then(function(d){
+    if (d.ok) {
+      al('alOtaCheck','ok','✓ ESP32 lädt Firmware herunter und startet neu…');
+      setTimeout(function(){ location.reload(); }, 25000);
+    } else {
+      al('alOtaCheck','err','✗ ' + (d.msg||'Fehler'));
+      document.getElementById('otaFlashProgress').style.display = 'none';
+      document.getElementById('otaFlashBtn').disabled = false;
+    }
+  }).catch(function(){
+    al('alOtaCheck','err','✗ Verbindung zum ESP32 unterbrochen.');
+    document.getElementById('otaFlashProgress').style.display = 'none';
+    document.getElementById('otaFlashBtn').disabled = false;
   });
 }
+
+// Alias für onchange im select-Element
+function relSelChange() { relSelect(); }
+
+// Compat: alter Name bleibt erhalten falls irgendwo genutzt
+function checkUpdate() { loadReleases(); }
 
 function loadAdapterVersion() {
   fetch('https://api.github.com/repos/' + GH_U + '/' + GH_I + '/releases/latest',
@@ -1558,6 +1692,7 @@ void hApiVersion() {
     String("{") +
     "\"version\":\"" + String(FW_VERSION) + "\"," +
     "\"build\":\"" + String(__DATE__) + " " + String(__TIME__) + "\"," +
+    "\"ip\":\""     + WiFi.localIP().toString() + "\"," +
     "\"ghUser\":\"" + String(GH_USER) + "\"," +
     "\"ghRepoEsp\":\"" + String(GH_REPO_ESP) + "\"," +
     "\"ghRepoIob\":\"" + String(GH_REPO_IOB) + "\"}");
@@ -1773,6 +1908,63 @@ void hApiDiscover() {
 }
 
 
+
+// POST /api/ota-github – Lädt eine .bin von einer URL und installiert sie per OTA.
+// Body: {"url":"https://...bin","version":"v0.3.0"}
+void hApiOtaGithub() {
+  if (!server.hasArg("plain")) {
+    server.send(400, "application/json", String("{"ok":false,"msg":"Kein Body"}"));
+    return;
+  }
+  DynamicJsonDocument doc(512);
+  if (deserializeJson(doc, server.arg("plain"))) {
+    server.send(400, "application/json", String("{"ok":false,"msg":"JSON-Fehler"}"));
+    return;
+  }
+  String url = doc["url"].as<String>();
+  String ver = doc["version"] | String("?");
+  if (!url.startsWith("http")) {
+    server.send(400, "application/json", String("{"ok":false,"msg":"Ungültige URL"}"));
+    return;
+  }
+
+  // Sofort antworten – OTA blockiert den WebServer
+  server.send(200, "application/json", String("{"ok":true,"msg":"OTA gestartet"}"));
+  addLog("OTA GitHub: lade " + ver + " von " + url);
+
+  delay(200);  // Antwort senden lassen
+
+  HTTPClient http;
+  http.begin(url);
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  http.setTimeout(30000);
+  int code = http.GET();
+  if (code != 200) {
+    addLog("OTA HTTP-Fehler: " + String(code));
+    http.end();
+    return;
+  }
+
+  int len = http.getSize();
+  if (!Update.begin(len > 0 ? len : UPDATE_SIZE_UNKNOWN)) {
+    addLog("OTA begin() Fehler");
+    http.end();
+    return;
+  }
+
+  WiFiClient* stream = http.getStreamPtr();
+  size_t written = Update.writeStream(*stream);
+  http.end();
+
+  if (Update.end() && Update.isFinished()) {
+    addLog("OTA erfolgreich: " + String(written) + " Bytes. Neustart…");
+    delay(500);
+    ESP.restart();
+  } else {
+    addLog("OTA fehlgeschlagen: " + String(Update.getError()));
+  }
+}
+
 // GET /api/restart – Startet den ESP32 neu (nach 500 ms Verzögerung).
 void hApiRestart() {
   server.send(200, "application/json", String("{") + "\"ok\":true,\"msg\":\"Neustart in 500ms\"}");
@@ -1847,9 +2039,9 @@ void setup() {
   digitalWrite(LED_PIN, LOW);  // LED aus
 
   Wire.begin(SDA_PIN, SCL_PIN);
-  if (!oled.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) Serial.println("OLED nicht gefunden!");
-  oled.clearDisplay(); oled.setTextColor(SSD1306_WHITE);
-  oledClear("MeterMaster","Node v1.3","Starte...");
+  u8g2.begin();
+  u8g2.setContrast(255);
+  oledClear("MeterMaster", "Node v" FW_VERSION, "Starte...");
 
   loadSettings();
 
@@ -1887,6 +2079,7 @@ void setup() {
   server.on("/api/nodename", HTTP_GET,  hApiNodeName);
   server.on("/api/log",      HTTP_GET,  hApiLog);
   server.on("/api/restart",  HTTP_GET,  hApiRestart);
+  server.on("/api/ota-github", HTTP_POST, hApiOtaGithub);
   server.on("/update",       HTTP_POST, hOtaFinish, hOtaUpload);
 
   nodeMac = WiFi.macAddress();

@@ -1,6 +1,6 @@
 # ⚡ MeterMaster ESP32 Node
 
-**v0.2.0** · ESP32 D1 Mini + 64×48 OLED
+**v0.3.0** · ESP32 D1 Mini + 64×48 OLED
 
 Ein WLAN-Display-Node für das [MeterMaster](https://github.com/MPunktBPunkt)-Ökosystem. Der ESP32 holt Zählerwerte aus ioBroker und zeigt sie auf einem winzigen OLED-Display an – konfigurierbar über eine eingebaute Web-Oberfläche.
 
@@ -135,7 +135,7 @@ Der Node registriert sich automatisch im [iobroker.metermaster](https://github.c
 
 | Version | Änderungen |
 |---|---|
-| v0.2.0 | Debug-Tab, `/api/log`, `/api/restart`, Bugfixes (JSON-Fehler Discover, loadInfo), Coding Rules |
+| v0.3.0 | Debug-Tab, `/api/log`, `/api/restart`, Bugfixes (JSON-Fehler Discover, loadInfo), Coding Rules |
 | v0.1.4 | Info-Tab, GitHub OTA-Check, 4 OLED-Stile, Adapter-Version |
 | v0.1.3 | Alarm-Tab, Bluetooth-Tab (Platzhalter), Discover im Einstellungen-Tab |
 | v0.1.2 | NTP-Zeit, WLAN-Tab, LED-Steuerung, Lila Theme |
