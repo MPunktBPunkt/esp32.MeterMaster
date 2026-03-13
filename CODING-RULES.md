@@ -29,26 +29,22 @@ Jede Datei beginnt mit einem standardisierten Block:
 ```cpp
 /*
  * ============================================================
- *  MeterMaster ESP32 Node  –  v1.5.0
+ *  MeterMaster ESP32 Node  –  v0.4.1
  *  Hardware: ESP32 D1 Mini + 64×48 OLED (SSD1306, I²C)
  * ============================================================
  *
- *  Kurzbeschreibung:
- *    WLAN-Display-Node für das MeterMaster-Ökosystem.
- *    Zeigt ioBroker-Zählerwerte auf OLED, registriert sich
- *    im Adapter und unterstützt Carousel-Anzeige.
+ *  Autor:   MPunktBPunkt  –  https://github.com/MPunktBPunkt
+ *  Lizenz:  MIT
  *
- *  Autor:    MPunktBPunkt
- *  Lizenz:   MIT
- *
- *  Libraries:
- *    - WiFiManager       by tzapu      >= 2.0.17
- *    - Adafruit SSD1306  by Adafruit   >= 2.5
- *    - ArduinoJson       by Blanchon   >= 6.21
+ *  Libraries (Arduino Library Manager):
+ *    - WiFiManager          by tzapu       >= 2.0.17
+ *    - U8g2                 by olikraus    >= 2.34
+ *    - ArduinoJson          by Blanchon    >= 6.21
  *
  *  Changelog:
- *    v1.5.0 – Carousel, Node-Registrierung, Config-Poll
- *    v1.4.0 – OTA GitHub-Check, 4 OLED-Stile, Info-Tab
+ *    v0.4.1 – cmd-Fernsteuerung (LED, Zähler), Heartbeat-Kachel
+ *    v0.4.0 – Registrierung direkt beim Adapter (Port 8089)
+ *    v0.3.0 – U8g2 OLED, Carousel, OTA GitHub-Dropdown
  * ============================================================
  */
 ```

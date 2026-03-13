@@ -1,19 +1,30 @@
 /*
  * ============================================================
- *  MeterMaster ESP32 Display Node  –  v0.3.0
+ *  MeterMaster ESP32 Display Node  –  v0.4.1
  *  Hardware: ESP32 D1 Mini + 64×48 OLED (SSD1306, I²C)
  * ============================================================
+ *
+ *  Autor:   MPunktBPunkt  –  https://github.com/MPunktBPunkt
+ *  Lizenz:  MIT
  *
  *  Libraries (Arduino Library Manager):
  *    - WiFiManager          by tzapu       >= 2.0.17
  *    - U8g2                 by olikraus    >= 2.34
  *    - ArduinoJson          by Blanchon    >= 6.21
  *
- *  NEU in v1.5:
- *    - Carousel: automatisch durch mehrere Zähler blättern
- *    - Node-Registrierung: ESP32 meldet sich bei ioBroker an
- *    - Config-Polling: ioBroker kann OLED-Zähler fernsteuern
- *    - /api/nodeinfo Endpunkt für den ioBroker-Adapter
+ *  Changelog:
+ *    v0.4.1  – cmd-Verarbeitung: LED & Zähler per Adapter fernsteuern
+ *              Heartbeat-Kachel im Dashboard; Adapter-Verbindungstest
+ *              Bugfix: oledStyle wird jetzt persistent gespeichert (NVS "oStyl")
+ *    v0.4.0  – Registrierung direkt beim MeterMaster-Adapter (Port 8089)
+ *              statt simple-api; adapterPort-Einstellung; registerOk-Status
+ *    v0.3.0  – U8g2 OLED-Library; Carousel (bis zu 5 Zähler)
+ *              OTA GitHub-Dropdown mit semver-Vergleich; Debug-Tab
+ *    v0.1.4  – Info-Tab, GitHub OTA-Check, 4 OLED-Stile
+ *    v0.1.3  – Alarm-Tab, Bluetooth-Platzhalter
+ *    v0.1.2  – NTP, WLAN-Tab, LED-Steuerung, Lila Theme
+ *    v0.1.1  – Discover-Dropdown, OTA, Web-Interface
+ *    v0.1.0  – Erstveröffentlichung
  * ============================================================
  */
 
@@ -28,7 +39,7 @@
 #include <U8g2lib.h>
 #include <time.h>
 // ── Hardware ──────────────────────────────────────────────────────────────────
-#define FW_VERSION  "0.3.0"
+#define FW_VERSION  "0.4.1"
 #define GH_USER     "MPunktBPunkt"
 #define GH_REPO_ESP "esp32.MeterMaster"
 #define GH_REPO_IOB "iobroker.metermaster"
@@ -52,7 +63,8 @@ Preferences prefs;
 
 // ── Persistente Einstellungen ─────────────────────────────────────────────────
 String iobHost      = "192.168.178.113";
-int    iobPort      = 8087;
+int    iobPort      = 8087;   // ioBroker simple-api (Zählerwerte lesen)
+int    adapterPort  = 8089;   // MeterMaster Adapter HTTP (Register, Config)
 String stateId      = "metermaster.0.MeinHaus.Westerheim.Warmwasser.readings.latest";
 String meterLabel   = "Warmwasser";
 String meterUnit    = "m³";
@@ -88,10 +100,12 @@ unsigned long lastCarousel = 0;
 bool carouselActive  = false;
 
 // ── ioBroker Node-Registration ────────────────────────────────────────────────
-String nodeMac       = "";   // gesetzt nach WiFi-Verbindung
-String nodeName      = "MeterMaster Node";
-unsigned long lastRegister  = 0;
-unsigned long lastConfigPoll= 0;
+String nodeMac          = "";   // gesetzt nach WiFi-Verbindung
+String nodeName         = "MeterMaster Node";
+unsigned long lastRegister   = 0;
+unsigned long lastRegisterOk = 0;  // millis() letzter erfolgreicher Heartbeat
+bool          registerOk     = false;
+unsigned long lastConfigPoll = 0;
 #define REGISTER_INTERVAL  60000   // alle 60s Heartbeat
 #define CONFIGPOLL_INTERVAL 15000  // alle 15s Config-Poll
 
@@ -319,45 +333,14 @@ void handleCarousel() {
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  ioBroker Node-Registration & Config-Poll
-//  Der ESP32 schreibt sich via simple-api in ioBroker ein:
-//    metermaster.0.nodes.{MAC}.ip        → IP-Adresse
-//    metermaster.0.nodes.{MAC}.name      → Gerätename
-//    metermaster.0.nodes.{MAC}.version   → Firmware-Version
-//    metermaster.0.nodes.{MAC}.lastSeen  → Unix-Timestamp (ms)
-//    metermaster.0.nodes.{MAC}.config    → wird vom Adapter beschrieben
+//  Ab v0.4.0: Kommunikation direkt mit dem MeterMaster Adapter (Port adapterPort):
+//    POST {adapterPort}/api/register          → Heartbeat + Node-Info
+//    GET  {adapterPort}/api/nodes/{MAC}/config → Config vom Adapter holen
+//    POST {adapterPort}/api/nodes/{MAC}/configAck → Config quittieren
+//
+//  simple-api (Port iobPort) wird nur noch für das Lesen der Zählerwerte genutzt.
 // ─────────────────────────────────────────────────────────────────────────────
-bool iobSet(const String& statePath, const String& value) {
-  if (WiFi.status() != WL_CONNECTED) return false;
-  HTTPClient http;
-  String url = "http://" + iobHost + ":" + String(iobPort)
-             + "/set/" + statePath + "?value=" + value;
-  http.begin(url); http.setTimeout(3000);
-  int code = http.GET();
-  http.end();
-  return (code == 200);
-}
 
-String iobGet(const String& statePath) {
-  if (WiFi.status() != WL_CONNECTED) return "";
-  HTTPClient http;
-  String url = "http://" + iobHost + ":" + String(iobPort) + "/get/" + statePath;
-  http.begin(url); http.setTimeout(3000);
-  int code = http.GET();
-  String val = "";
-  if (code == 200) {
-    StaticJsonDocument<64> f; f["val"] = true;
-    DynamicJsonDocument doc(256);
-    if (!deserializeJson(doc, http.getString(), DeserializationOption::Filter(f))) {
-      JsonVariant s;
-      if(doc.is<JsonArray>()) s=doc[0]; else s=doc.as<JsonVariant>();
-      val = s["val"].as<String>();
-    }
-  }
-  http.end();
-  return val;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
 //  Log-Ringpuffer (Debug-Tab)
 //  Speichert die letzten LOG_SIZE Einträge im RAM.
@@ -390,37 +373,95 @@ void addLog(const String& msg) {
 
 
 void registerNode() {
-  if (iobHost.isEmpty() || iobPort == 0) return;
-  String base = "metermaster.0.nodes." + nodeMac + ".";
-  String ts = String(millis());  // Uptime als Proxy (kein NTP-abhängig)
-  // echten Timestamp wenn NTP sync
-  if (ntpSynced) {
-    struct tm ti; if (getLocalTime(&ti)) {
-      time_t t = mktime(&ti);
-      char tsbuf[24]; snprintf(tsbuf, sizeof(tsbuf), "%lld", (long long)t * 1000LL); ts = String(tsbuf);
-    }
+  if (iobHost.isEmpty() || adapterPort == 0) return;
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  // JSON-Body aufbauen
+  String body = String("{")
+    + "\"mac\":\""     + nodeMac                      + "\","
+    + "\"ip\":\""      + WiFi.localIP().toString()    + "\","
+    + "\"name\":\""    + nodeName                     + "\","
+    + "\"version\":\"" + FW_VERSION                   + "\""
+    + "}";
+
+  HTTPClient http;
+  String url = "http://" + iobHost + ":" + String(adapterPort) + "/api/register";
+  http.begin(url);
+  http.addHeader("Content-Type", "application/json");
+  http.setTimeout(5000);
+  int code = http.POST(body);
+  http.end();
+
+  if (code == 200) {
+    registerOk     = true;
+    lastRegisterOk = millis();
+    addLog("Node registriert: " + nodeMac);
+    Serial.println("Node registered: " + nodeMac);
+  } else {
+    registerOk = false;
+    addLog("Register fehlgeschlagen: HTTP " + String(code));
+    Serial.println("Register failed: " + String(code));
   }
-  iobSet(base+"ip",       WiFi.localIP().toString());
-  iobSet(base+"name",     nodeName);
-  iobSet(base+"version",  FW_VERSION);
-  iobSet(base+"lastSeen", ts);
-  addLog("Node registriert: " + nodeMac);
-  Serial.println("Node registered: " + nodeMac);
 }
 
-// Liest config-State vom ioBroker – Adapter schreibt JSON rein
+// Liest config vom MeterMaster Adapter – Adapter schreibt JSON rein
 // Format: {"sid":"metermaster.0.X","label":"Strom","unit":"kWh"}
 void pollConfig() {
-  String base = "metermaster.0.nodes." + nodeMac + ".";
-  String cfg = iobGet(base + "config");
-  if (cfg.isEmpty() || cfg == "null" || cfg == "") return;
+  if (iobHost.isEmpty() || adapterPort == 0) return;
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  HTTPClient http;
+  String url = "http://" + iobHost + ":" + String(adapterPort)
+             + "/api/nodes/" + nodeMac + "/config";
+  http.begin(url);
+  http.setTimeout(5000);
+  int code = http.GET();
+  if (code != 200) { http.end(); return; }
+  String payload = http.getString();
+  http.end();
+
+  if (payload.isEmpty()) return;
+
+  // Adapter antwortet: { "ok": true, "config": "<JSON-String oder null>", "cmd": "<JSON oder null>" }
+  DynamicJsonDocument wrapper(512);
+  if (deserializeJson(wrapper, payload)) return;
+  if (!wrapper["ok"].as<bool>()) return;
+
+  // ── CMD verarbeiten (einmalig, Adapter löscht danach) ──
+  String cmdStr = wrapper["cmd"] | "";
+  if (!cmdStr.isEmpty() && cmdStr != "null") {
+    DynamicJsonDocument cmd(128);
+    if (!deserializeJson(cmd, cmdStr)) {
+      if (cmd.containsKey("ledOn")) {
+        ledOn = cmd["ledOn"].as<bool>();
+        digitalWrite(LED_PIN, ledOn ? HIGH : LOW);
+        addLog(String("CMD: LED ") + (ledOn ? "ein" : "aus"));
+      }
+      if (cmd.containsKey("sid")) {
+        stateId    = cmd["sid"]   | stateId;
+        meterLabel = cmd["label"] | meterLabel;
+        meterUnit  = cmd["unit"]  | meterUnit;
+        saveSettings();
+        lastFetch = 0;
+        addLog("CMD: Zähler geändert → " + meterLabel);
+      }
+    }
+  }
+
+  // ── Config verarbeiten ──
+  String cfgStr = wrapper["config"] | "";
+  if (cfgStr.isEmpty() || cfgStr == "null") return;
 
   DynamicJsonDocument doc(512);
-  if (deserializeJson(doc, cfg)) return;
+  if (deserializeJson(doc, cfgStr)) return;
+
+  // Leer-Config (sid == "") ignorieren
+  String newSid = doc["sid"] | "";
+  if (newSid.isEmpty() && !doc.containsKey("carousel")) return;
 
   bool changed = false;
-  if (doc.containsKey("sid") && doc["sid"].as<String>() != stateId) {
-    stateId    = doc["sid"].as<String>();
+  if (doc.containsKey("sid") && newSid != stateId) {
+    stateId    = newSid;
     meterLabel = doc["label"] | meterLabel;
     meterUnit  = doc["unit"]  | meterUnit;
     changed    = true;
@@ -434,7 +475,6 @@ void pollConfig() {
     carouselActive = doc["carouselActive"].as<bool>();
     changed = true;
   }
-  // Neuen Carousel-Eintrag vom Adapter empfangen
   if (doc.containsKey("carousel") && doc["carousel"].is<JsonArray>()) {
     JsonArray arr = doc["carousel"].as<JsonArray>();
     carouselCount = 0;
@@ -449,14 +489,24 @@ void pollConfig() {
     }
     changed = true;
   }
+
   if (changed) {
     saveSettings();
     saveCarousel();
-    lastFetch = 0;  // sofort neu laden
-    addLog("Config vom ioBroker übernommen");
-  Serial.println("Config vom ioBroker übernommen");
-    // Config-State zurücksetzen (quittieren)
-    iobSet(base + "configAck", String(millis()));
+    lastFetch = 0;
+    addLog("Config vom Adapter übernommen");
+    Serial.println("Config vom Adapter übernommen");
+
+    // ConfigAck an Adapter melden
+    HTTPClient ackHttp;
+    String ackUrl = "http://" + iobHost + ":" + String(adapterPort)
+                  + "/api/nodes/" + nodeMac + "/configAck";
+    ackHttp.begin(ackUrl);
+    ackHttp.addHeader("Content-Type", "application/json");
+    ackHttp.setTimeout(3000);
+    String ackBody = String("{\"ack\":\"") + FW_VERSION + "@" + String(millis()) + "\"}";
+    ackHttp.POST(ackBody);
+    ackHttp.end();
   }
 }
 
@@ -467,6 +517,7 @@ void loadSettings() {
   prefs.begin("mm", true);
   iobHost        = prefs.getString("host",  "192.168.178.113");
   iobPort        = prefs.getInt   ("port",  8087);
+  adapterPort    = prefs.getInt   ("aport", 8089);
   stateId        = prefs.getString("sid",   "metermaster.0.MeinHaus.Westerheim.Warmwasser.readings.latest");
   meterLabel     = prefs.getString("lbl",   "Warmwasser");
   meterUnit      = prefs.getString("unit",  "m³");
@@ -474,12 +525,14 @@ void loadSettings() {
   alarmEnabled   = prefs.getBool  ("alEn",  false);
   alarmThreshold = prefs.getFloat ("alThr", 100.0);
   alarmAbove     = prefs.getBool  ("alAb",  true);
+  oledStyle      = prefs.getInt   ("oStyl", 0);
   prefs.end();
 }
 void saveSettings() {
   prefs.begin("mm", false);
   prefs.putString("host", iobHost);
   prefs.putInt   ("port", iobPort);
+  prefs.putInt   ("aport",adapterPort);
   prefs.putString("sid",  stateId);
   prefs.putString("lbl",  meterLabel);
   prefs.putString("unit", meterUnit);
@@ -487,6 +540,7 @@ void saveSettings() {
   prefs.putBool  ("alEn", alarmEnabled);
   prefs.putFloat ("alThr",alarmThreshold);
   prefs.putBool  ("alAb", alarmAbove);
+  prefs.putInt   ("oStyl",oledStyle);
   prefs.end();
 }
 
@@ -710,6 +764,11 @@ const char H_DB[] PROGMEM = R"RAW(
         <div class="v"><span class="dot derr" id="dDot"></span><span id="dSt">...</span></div></div>
       <div class="cell"><div class="k">Letztes Update</div><div class="v" id="dAge">–</div></div>
     </div>
+    <div class="g2" style="margin-top:6px">
+      <div class="cell"><div class="k">📡 Adapter-Heartbeat</div>
+        <div class="v"><span class="dot" id="dRegDot" style="background:#374151;border:2px solid #4b5563"></span><span id="dRegSt" style="font-size:.85rem">–</span></div></div>
+      <div class="cell"><div class="k">Letzter Heartbeat</div><div class="v" id="dRegAge" style="font-size:.85rem">–</div></div>
+    </div>
     <div id="alarmBadge" class="alarm-badge alarm-off" style="margin-top:10px">
       <span id="alarmDot">🔔</span><span id="alarmTxt">Kein Alarm</span>
     </div>
@@ -767,7 +826,7 @@ const char H_CFG[] PROGMEM = R"RAW(
     <label>Host / IP</label>
     <input id="cHost" placeholder="192.168.178.113">
     <div class="r2">
-      <div><label>Port</label><input id="cPort" type="number"></div>
+      <div><label>Port Simple-API</label><input id="cPort" type="number" placeholder="8087"></div>
       <div><label>Intervall (s)</label><input id="cInt" type="number"></div>
     </div>
     <div class="r2" style="margin-top:11px">
@@ -775,6 +834,13 @@ const char H_CFG[] PROGMEM = R"RAW(
       <button class="btn sm" style="margin-top:0;width:100%" onclick="discover()">🔍 Zähler laden</button>
     </div>
     <div id="alDisc" class="al"></div>
+  </div>
+  <div class="card">
+    <div class="h2"><i>📡</i>MeterMaster Adapter</div>
+    <label>Port Adapter</label>
+    <input id="cAPort" type="number" placeholder="8089">
+    <div id="alCfgAdapter" class="al" style="margin-top:8px"></div>
+    <button class="btn sec" style="margin-top:10px" onclick="testAdapter()">🔗 Adapter testen</button>
   </div>
   <div class="card">
     <div class="h2"><i>🔢</i>Verfügbare Zähler</div>
@@ -929,6 +995,8 @@ const char H_INFO[] PROGMEM = R"RAW(
   </div>
   <div class="card">
     <div class="h2"><i>📝</i>Changelog</div>
+    <div class="irow"><span class="ik">v0.4.1</span><span class="iv" style="font-size:.75rem;text-align:right">cmd-Fernsteuerung (LED, Zähler),<br>Heartbeat-Kachel, oledStyle-Fix</span></div>
+    <div class="irow"><span class="ik">v0.4.0</span><span class="iv" style="font-size:.75rem;text-align:right">Adapter-HTTP statt simple-api,<br>Register / Config / Ack</span></div>
     <div class="irow"><span class="ik">v0.3.0</span><span class="iv" style="font-size:.75rem;text-align:right">U8g2 OLED, Umlaute,<br>GitHub OTA-Dropdown</span></div>
     <div class="irow"><span class="ik">v0.1.4</span><span class="iv" style="font-size:.75rem;text-align:right">Info-Tab, GitHub OTA,<br>OLED-Stile, Adapter-Version</span></div>
     <div class="irow"><span class="ik">v0.1.3</span><span class="iv" style="font-size:.75rem;text-align:right">Alarm-Tab, Bluetooth-Tab,<br>Discover im Einstellungen-Tab</span></div>
@@ -1207,6 +1275,20 @@ function refreshDash(){
     document.getElementById('otaIp').textContent=d.ip;
     setLedUi(d.ledOn);
     setAlarmBadge(d.alarmActive, d.alarmActive?'ALARM AKTIV':'Kein Alarm','alarmBadge');
+    // Heartbeat-Kachel
+    const regDot=document.getElementById('dRegDot');
+    const regSt=document.getElementById('dRegSt');
+    const regAge=document.getElementById('dRegAge');
+    if(regDot&&regSt&&regAge){
+      if(d.registerOk){
+        regDot.style.background='#4CAF50';regDot.style.border='2px solid #81C784';regDot.style.boxShadow='0 0 6px #4CAF50';
+        regSt.textContent='Registriert';regSt.style.color='#A5D6A7';
+      } else {
+        regDot.style.background='#F44336';regDot.style.border='2px solid #E57373';regDot.style.boxShadow='none';
+        regSt.textContent='Nicht registriert';regSt.style.color='#EF9A9A';
+      }
+      regAge.textContent=d.lastRegisterAgo||'–';
+    }
     // Dropdown vorbelegen
     const sel=document.getElementById('oSel');
     if(sel.options.length<=1&&d.stateId){
@@ -1219,6 +1301,14 @@ function refreshDash(){
   }).catch(()=>{});
 }
 setInterval(refreshDash,15000);
+
+function testAdapter(){
+  al('alCfgAdapter','inf','Verbinde mit Adapter…');
+  const b={adapterPort:+(document.getElementById('cAPort').value||8089)};
+  fetch('/api/testadapter',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})
+    .then(r=>r.json()).then(d=>al('alCfgAdapter',d.ok?'ok':'err',d.ok?'✓ '+d.msg:'✗ '+d.msg,4000))
+    .catch(e=>al('alCfgAdapter','err','✗ '+e.message,4000));
+}
 
 // ── OLED Dropdown ─────────────────────────────────────────────────────────────
 function oSelChange(){
@@ -1259,6 +1349,7 @@ function loadCfg(){
   fetch('/api/settings').then(r=>r.json()).then(d=>{
     document.getElementById('cHost').value=d.iobHost;
     document.getElementById('cPort').value=d.iobPort;
+    document.getElementById('cAPort').value=d.adapterPort||8089;
     document.getElementById('cSid').value=d.stateId;
     document.getElementById('cLbl').value=d.label;
     document.getElementById('cUnt').value=d.unit;
@@ -1268,6 +1359,7 @@ function loadCfg(){
 function saveCfg(){
   const b={iobHost:document.getElementById('cHost').value,
            iobPort:+document.getElementById('cPort').value,
+           adapterPort:+(document.getElementById('cAPort').value||8089),
            stateId:document.getElementById('cSid').value,
            label:document.getElementById('cLbl').value,
            unit:document.getElementById('cUnt').value,
@@ -1839,7 +1931,8 @@ void hApiNodeName() {
 void hRoot() { server.send(200,"text/html",buildPage()); }
 
 void hApiStatus() {
-  String ago = (lastFetch==0)?"Nie":(String((millis()-lastFetch)/1000)+" s");
+  String ago    = (lastFetch==0)?"Nie":(String((millis()-lastFetch)/1000)+" s");
+  String regAgo = (lastRegisterOk==0)?"Nie":(String((millis()-lastRegisterOk)/1000)+" s");
   server.send(200,"application/json",
     "{\"ok\":"            + String(fetchOk?"true":"false")
     +",\"value\":"        + String(currentValue,4)
@@ -1855,6 +1948,8 @@ void hApiStatus() {
     +",\"alarmEnabled\":"  + String(alarmEnabled?"true":"false")
     +",\"alarmThreshold\":"+ String(alarmThreshold,2)
     +",\"alarmAbove\":"    + String(alarmAbove?"true":"false")
+    +",\"registerOk\":"    + String(registerOk?"true":"false")
+    +",\"lastRegisterAgo\":\"" + regAgo + "\""
     +",\"ip\":\""          + WiFi.localIP().toString() +"\"}");
 }
 
@@ -1862,6 +1957,7 @@ void hApiGetSettings() {
   server.send(200,"application/json",
     "{\"iobHost\":\""     + iobHost   +"\""
     +",\"iobPort\":"      + String(iobPort)
+    +",\"adapterPort\":"  + String(adapterPort)
     +",\"stateId\":\""    + stateId   +"\""
     +",\"label\":\""      + meterLabel+"\""
     +",\"unit\":\""       + meterUnit +"\""
@@ -1875,8 +1971,9 @@ void hApiPostSettings() {
   if (!server.hasArg("plain")) { server.send(400,"application/json","{\"ok\":false,\"msg\":\"Kein Body\"}"); return; }
   DynamicJsonDocument doc(512);
   if (deserializeJson(doc,server.arg("plain"))) { server.send(400,"application/json","{\"ok\":false,\"msg\":\"JSON\"}"); return; }
-  if (!doc["iobHost"].isNull()) iobHost    = doc["iobHost"].as<String>();
-  if (!doc["iobPort"].isNull()) iobPort    = doc["iobPort"].as<int>();
+  if (!doc["iobHost"].isNull()) iobHost      = doc["iobHost"].as<String>();
+  if (!doc["iobPort"].isNull()) iobPort      = doc["iobPort"].as<int>();
+  if (!doc["adapterPort"].isNull()) adapterPort = doc["adapterPort"].as<int>();
   if (!doc["stateId"].isNull()) stateId    = doc["stateId"].as<String>();
   if (!doc["label"].isNull())   meterLabel = doc["label"].as<String>();
   if (!doc["unit"].isNull())    meterUnit  = doc["unit"].as<String>();
@@ -1918,6 +2015,42 @@ void hApiTestConn() {
   http.end();
   server.send(200,"application/json",
     "{\"ok\":"+String(ok?"true":"false")+",\"value\":"+String(val,4)+",\"msg\":\""+msg+"\"}");
+}
+
+void hApiTestAdapter() {
+  // Testet die Verbindung zum MeterMaster Adapter (Port adapterPort)
+  // via GET /api/version – kein Auth nötig
+  int tp = adapterPort;
+  if (server.hasArg("plain")) {
+    DynamicJsonDocument doc(128);
+    if (!deserializeJson(doc, server.arg("plain")))
+      if (!doc["adapterPort"].isNull()) tp = doc["adapterPort"].as<int>();
+  }
+  if (WiFi.status() != WL_CONNECTED) {
+    server.send(200, "application/json", "{\"ok\":false,\"msg\":\"WLAN getrennt\"}"); return;
+  }
+  HTTPClient http;
+  http.begin("http://" + iobHost + ":" + String(tp) + "/api/version");
+  http.setTimeout(5000);
+  int code = http.GET();
+  String ver = "?";
+  bool ok = false;
+  String msg;
+  if (code == 200) {
+    StaticJsonDocument<64> f; f["current"] = true;
+    DynamicJsonDocument resp(256);
+    if (!deserializeJson(resp, http.getString(), DeserializationOption::Filter(f))) {
+      ver = resp["current"] | "?";
+      ok = true; msg = "Adapter v" + ver + " erreichbar";
+    } else { msg = "JSON-Fehler"; }
+  } else if (code < 0) {
+    msg = "Keine Verbindung zu " + iobHost + ":" + String(tp);
+  } else {
+    msg = "HTTP " + String(code);
+  }
+  http.end();
+  server.send(200, "application/json",
+    "{\"ok\":" + String(ok?"true":"false") + ",\"version\":\"" + ver + "\",\"msg\":\"" + msg + "\"}");
 }
 
 void hApiOled() {
@@ -2122,7 +2255,8 @@ void setup() {
   server.on("/api/settings", HTTP_GET,  hApiGetSettings);
   server.on("/api/settings", HTTP_POST, hApiPostSettings);
   server.on("/api/alarm",    HTTP_POST, hApiPostAlarm);
-  server.on("/api/test",     HTTP_POST, hApiTestConn);
+  server.on("/api/test",        HTTP_POST, hApiTestConn);
+  server.on("/api/testadapter", HTTP_POST, hApiTestAdapter);
   server.on("/api/oled",     HTTP_POST, hApiOled);
   server.on("/api/discover", HTTP_GET,  hApiDiscover);
   server.on("/api/led",      HTTP_GET,  hApiLed);
