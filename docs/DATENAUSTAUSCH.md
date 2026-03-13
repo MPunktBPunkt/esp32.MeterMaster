@@ -1,37 +1,33 @@
-# ESP32 ↔ ioBroker Adapter – Datenaustausch
+# ESP32 ↔ ioBroker – Datenaustausch
 
-> **Status:** Implementiert und im Feldeinsatz bestätigt (v0.3.0, 12.03.2026)  
-> Adapter-Gegenseite (iobroker.metermaster >= v0.5.0) steht noch aus.
->
-> Bestätigt funktionsfähig: Node-Registrierung, Heartbeat, Simple-API Fetch, Discover
->
-> ~~Beschreibt den geplanten Datenaustausch~~ für `iobroker.metermaster` >= v0.5.0  
-> Der Adapter wird in einem separaten Schritt angepasst.  
-> ESP32-Firmware: `MeterMaster_ESP32_Node` ab v0.3.0
+> **Status:** Implementiert und aktiv (v0.4.1 / Adapter v0.7.0, Stand 13.03.2026)  
+> Dieses Dokument beschreibt die vollständige Kommunikationsarchitektur zwischen dem  
+> ESP32 Display-Node und dem ioBroker MeterMaster-Adapter.
 
 ---
 
-## Übersicht
+## Übersicht – Zwei Kommunikationskanäle
 
-Der ESP32-Node kommuniziert mit dem ioBroker-Adapter über **zwei Kanäle**:
-
-| Kanal | Richtung | Protokoll | Verwendung |
+| Kanal | Richtung | Port | Verwendung |
 |---|---|---|---|
-| ioBroker Simple-API | ESP32 → ioBroker | HTTP GET/SET | Zählerwerte lesen, Node registrieren |
-| ioBroker Simple-API | ioBroker → ESP32 (indirekt) | HTTP GET (poll) | Config vom Adapter übernehmen |
+| **ioBroker Simple-API** | ESP32 → ioBroker | 8087 | Nur Zählerwerte lesen + Discover |
+| **MeterMaster Adapter** | ESP32 ↔ Adapter | 8089 | Registrierung, Config, Cmd |
 
 Der ESP32 agiert immer als **HTTP-Client** – er initiiert alle Anfragen.  
-Der Adapter schreibt Steuerbefehle als ioBroker-States, die der ESP32 per Poll abholt.
+States (`metermaster.0.nodes.*`) werden **nicht** über simple-api geschrieben, sondern der Adapter legt sie selbst an, wenn der ESP32 sich registriert.
+
+> **Warum nicht simple-api für Registrierung?**  
+> Die simple-api kann nur *bereits angelegte* States schreiben. Die `nodes.*`-States existieren erst nach der ersten Adapter-Registrierung – ein Henne-Ei-Problem. Daher kommuniziert der ESP32 direkt mit dem Adapter-HTTP-Server.
 
 ---
 
-## 1 · Zählerwerte lesen
+## 1 · Zählerwerte lesen (Simple-API)
 
 Der ESP32 liest Zählerwerte direkt über die ioBroker Simple-API.
 
 **Endpunkt:**
 ```
-GET http://{iobHost}:{iobPort}/getPlainValue/{stateId}
+GET http://{iobHost}:8087/getPlainValue/{stateId}
 ```
 
 **Beispiel:**
@@ -41,111 +37,147 @@ GET http://192.168.178.113:8087/getPlainValue/metermaster.0.MeinHaus.Westerheim.
 ```
 
 **Intervall:** konfigurierbar im Einstellungen-Tab (Standard: 60 s)  
-**Konfigurierter State:** wird in NVS (`Preferences`) unter Key `sid` gespeichert
+**State-ID:** wird in NVS (`Preferences`) unter Key `sid` gespeichert
 
 ---
 
 ## 2 · Verfügbare Zähler entdecken (Discover)
 
-Beim Klick auf „Zähler laden" im Einstellungen-Tab ruft der ESP32 alle `metermaster.*`-States ab.
+Beim Klick auf „Zähler laden" im Einstellungen-Tab lädt der ESP32 die Discover-Liste direkt vom Adapter.
 
-**Endpunkt:**
+**Endpunkt (Adapter-API):**
 ```
-GET http://{iobHost}:{iobPort}/getStates/metermaster.*
+GET http://{iobHost}:8089/api/discover
 ```
 
-**Antwort (Simple-API):**
+**Antwort:**
 ```json
-{
-  "metermaster.0.MeinHaus.Westerheim.Warmwasser.readings.latest": {
-    "val": 94.05,
-    "ack": true,
-    "ts": 1709123456789
-  },
-  ...
-}
+[
+  {
+    "stateId":   "metermaster.0.MeinHaus.Westerheim.Warmwasser.readings.latest",
+    "label":     "Warmwasser",
+    "unit":      "m³",
+    "typeName":  "HotWater",
+    "house":     "MeinHaus",
+    "apartment": "Westerheim",
+    "meter":     "Warmwasser",
+    "latest":    94.049
+  }
+]
 ```
-
-Der ESP32 filtert States heraus, deren `val` numerisch ist (float/int), und leitet daraus Label und Einheit ab.
 
 ---
 
-## 3 · Node-Registrierung (ESP32 → ioBroker)
+## 3 · Node-Registrierung / Heartbeat (ESP32 → Adapter)
 
-Beim Start und alle **60 Sekunden** schreibt der ESP32 seine Präsenz in ioBroker.
+Beim Start und danach alle **60 Sekunden** meldet sich der ESP32 beim Adapter an.
 
-**Endpunkt (Simple-API SET):**
+**Endpunkt:**
 ```
-GET http://{iobHost}:{iobPort}/set/{stateId}?value={wert}
+POST http://{iobHost}:8089/api/register
+Content-Type: application/json
+
+{
+  "mac":     "C8C9A3CB7B08",
+  "ip":      "192.168.178.110",
+  "name":    "MeterMaster Node",
+  "version": "0.4.1"
+}
 ```
 
-**Geschriebene States** (Namespace: `metermaster.0.nodes.{MAC}`):
+**Erfolgsantwort:**
+```json
+{ "ok": true, "mac": "C8C9A3CB7B08", "lastSeen": 1741000000000 }
+```
 
-| State | Typ | Beispielwert | Beschreibung |
-|---|---|---|---|
-| `nodes.{MAC}.ip` | string | `192.168.178.110` | Aktuelle IP-Adresse |
-| `nodes.{MAC}.name` | string | `MeterMaster Node` | Anzeigename (editierbar im Carousel-Tab) |
-| `nodes.{MAC}.version` | string | `0.2.0` | Firmware-Version |
-| `nodes.{MAC}.lastSeen` | number | `1709123456789` | Unix-Timestamp (ms) |
+**Was der Adapter dabei tut:**
+- Legt `metermaster.0.nodes.{MAC}.*` States beim ersten Heartbeat automatisch an
+- Aktualisiert `ip`, `name`, `version`, `lastSeen` in nodesCache + ioBroker States
+- Falls der Adapter neu gestartet wurde: der ESP32 re-registriert sich spätestens nach 60 s
 
 **MAC-Format:** `C8C9A3CB7B08` (ohne Doppelpunkte, Großbuchstaben)
 
-**Adapter-Aufgabe (TODO):**  
-Diese States müssen im Adapter als `type: "state"` mit passendem `role` und `type` angelegt werden, wenn sie noch nicht existieren.
-
 ---
 
-## 4 · Config-Poll (ioBroker → ESP32)
+## 4 · Config-Poll (Adapter → ESP32)
 
-Der ESP32 liest alle **15 Sekunden** einen Config-State, den der Adapter beschreiben kann.
+Der ESP32 fragt alle **15 Sekunden** seine Konfiguration und ausstehende Befehle ab.
 
 **Endpunkt:**
 ```
-GET http://{iobHost}:{iobPort}/getPlainValue/metermaster.0.nodes.{MAC}.config
+GET http://{iobHost}:8089/api/nodes/{MAC}/config
 ```
 
-**Erwarteter Wert:** JSON-String (serialisiert als ioBroker string-State)
-
+**Antwort:**
 ```json
 {
-  "sid":             "metermaster.0.MeinHaus.Westerheim.Warmwasser.readings.latest",
-  "label":           "Warmwasser",
-  "unit":            "m³",
-  "carouselActive":  false,
-  "carouselSec":     10,
-  "carousel": [
-    { "sid": "...readings.latest", "label": "Warmwasser", "unit": "m³" },
-    { "sid": "...readings.latest", "label": "Kaltwasser",  "unit": "m³" }
-  ]
+  "ok":  true,
+  "config": "{\"sid\":\"metermaster.0.MeinHaus.Westerheim.Warmwasser.readings.latest\",\"label\":\"Warmwasser\",\"unit\":\"m³\",\"carouselActive\":false,\"carouselSec\":10,\"carousel\":[]}",
+  "cmd":  "{\"ledOn\": true}"
 }
 ```
 
-| Feld | Typ | Pflicht | Beschreibung |
-|---|---|---|---|
-| `sid` | string | nein | State-ID für Einzelanzeige (ersetzt aktuelle Einstellung) |
-| `label` | string | nein | Anzeigetext auf OLED |
-| `unit` | string | nein | Einheit (m³, kWh, ...) |
-| `carouselActive` | bool | nein | Carousel ein/aus |
-| `carouselSec` | number | nein | Wechselintervall in Sekunden |
-| `carousel` | array | nein | Carousel-Einträge (max. 5) |
+| Feld | Typ | Bedeutung |
+|---|---|---|
+| `ok` | bool | Anfrage erfolgreich |
+| `config` | string\|null | JSON-String mit Zähler-Konfiguration, null = keine Änderung |
+| `cmd` | string\|null | JSON-String mit Sofortbefehl, null = kein Befehl; wird nach Auslieferung vom Adapter gelöscht |
+
+### Config-Felder
+
+| Feld | Typ | Beschreibung |
+|---|---|---|
+| `sid` | string | State-ID des anzuzeigenden Zählers |
+| `label` | string | Anzeigetext auf dem OLED |
+| `unit` | string | Einheit (m³, kWh, ...) |
+| `carouselActive` | bool | Carousel ein/aus |
+| `carouselSec` | number | Wechselintervall in Sekunden |
+| `carousel` | array | Bis zu 5 Einträge mit `sid`, `label`, `unit` |
 
 Felder die nicht vorhanden sind werden ignoriert – der ESP32 behält seinen lokalen Wert.
 
-**Nach Übernahme:** ESP32 schreibt Bestätigung:
+---
+
+## 5 · ConfigAck (ESP32 → Adapter)
+
+Nach Übernahme einer neuen Config quittiert der ESP32:
+
+**Endpunkt:**
 ```
-GET http://{iobHost}:{iobPort}/set/metermaster.0.nodes.{MAC}.configAck?value=1
+POST http://{iobHost}:8089/api/nodes/{MAC}/configAck
+Content-Type: application/json
+
+{ "ack": "0.4.1@12345" }
 ```
 
-**Adapter-Aufgabe (TODO):**  
-- State `nodes.{MAC}.config` als beschreibbaren string-State anlegen
-- State `nodes.{MAC}.configAck` als number-State anlegen (read-only aus Adapter-Sicht)
-- Admin-UI: Config per JSON-Editor oder Formular befüllen und in den State schreiben
+Der Adapter speichert den ack-Wert im State `nodes.{MAC}.configAck`.
 
 ---
 
-## 5 · `/api/nodeinfo` – Adapter-Abfrage am ESP32
+## 6 · Sofortbefehle – cmd (Adapter → ESP32)
 
-Der Adapter kann optional aktive Nodes direkt befragen.
+Der Adapter kann Sofortbefehle setzen, die beim nächsten Config-Poll (max. 15 s) ausgeführt werden. Der Befehl wird danach vom Adapter automatisch gelöscht (einmalige Auslieferung).
+
+**Befehle über Adapter-API:**
+```
+POST http://{iobHost}:8089/api/nodes/{MAC}/cmd
+Content-Type: application/json
+Authorization: Basic ...
+
+{ "ledOn": true }
+```
+
+| Befehl | Payload | Wirkung am ESP32 |
+|---|---|---|
+| LED ein | `{"ledOn": true}` | LED einschalten |
+| LED aus | `{"ledOn": false}` | LED ausschalten |
+| Zähler wechseln | `{"sid":"...", "label":"...", "unit":"..."}` | Sofortiger Zählerwechsel + Speichern |
+
+---
+
+## 7 · `/api/nodeinfo` – direkter Adapter-Zugriff auf ESP32
+
+Der Adapter kann optional online Nodes direkt befragen (z.B. für Live-Status in der Web-UI).
 
 **Endpunkt (am ESP32):**
 ```
@@ -155,69 +187,59 @@ GET http://{nodeIp}/api/nodeinfo
 **Antwort:**
 ```json
 {
-  "mac":           "C8C9A3CB7B08",
-  "ip":            "192.168.178.110",
-  "name":          "MeterMaster Node",
-  "version":       "0.2.0",
-  "sid":           "metermaster.0.MeinHaus.Westerheim.Warmwasser.readings.latest",
-  "label":         "Warmwasser",
-  "unit":          "m³",
-  "value":         94.05,
-  "fetchOk":       true,
-  "carouselActive":false,
-  "carouselCount": 0,
-  "uptime":        387
+  "mac":            "C8C9A3CB7B08",
+  "ip":             "192.168.178.110",
+  "name":           "MeterMaster Node",
+  "version":        "0.4.1",
+  "uptime":         3600,
+  "rssi":           -68,
+  "stateId":        "metermaster.0.MeinHaus.Westerheim.Warmwasser.readings.latest",
+  "label":          "Warmwasser",
+  "unit":           "m³",
+  "value":          94.049,
+  "fetchOk":        true,
+  "carouselActive": false,
+  "carouselIdx":    0,
+  "carouselSec":    10,
+  "carousel":       []
 }
 ```
 
-Damit kann der Adapter eine Node-Liste im Admin-UI anzeigen, ohne auf die ioBroker-States angewiesen zu sein.
+---
+
+## 8 · ioBroker State-Struktur
+
+```
+metermaster.0.
+└── nodes/
+    └── C8C9A3CB7B08/          ← MAC-Adresse (ohne Doppelpunkte)
+        ├── ip          string  "192.168.178.110"   read-only (Adapter schreibt)
+        ├── name        string  "MeterMaster Node"  read-only (Adapter schreibt)
+        ├── version     string  "0.4.1"             read-only (Adapter schreibt)
+        ├── lastSeen    number  1741000000000       read-only (Adapter schreibt, ms)
+        ├── config      string  "{...}"             writable  (Adapter schreibt, ESP32 liest)
+        ├── configAck   string  "0.4.1@12345"       read-only (Adapter schreibt nach Ack)
+        └── cmd         string  "{...}"             writable  (Adapter schreibt, ESP32 liest+löscht)
+```
+
+Alle States werden vom Adapter bei der ersten Registrierung automatisch angelegt.
 
 ---
 
-## 6 · State-Struktur im ioBroker (Soll)
-
-```
-metermaster.0
-└── nodes
-    └── C8C9A3CB7B08          ← MAC-Adresse (ohne Doppelpunkte)
-        ├── ip          string  "192.168.178.110"
-        ├── name        string  "MeterMaster Node"
-        ├── version     string  "0.2.0"
-        ├── lastSeen    number  1709123456789
-        ├── config      string  "{...}"   ← Adapter schreibt, ESP32 liest
-        └── configAck   number  1         ← ESP32 schreibt, Adapter liest
-```
-
----
-
-## 7 · Timing-Übersicht
+## 9 · Timing-Übersicht
 
 | Aktion | Intervall | Auslöser |
 |---|---|---|
-| Zählerwert lesen | konfigurierbar (Standard 60 s) | Timer in `loop()` |
-| Node registrieren | 60 s + beim Start | Timer in `loop()` |
-| Config-Poll | 15 s | Timer in `loop()` |
-| Discover | on-demand | Button im Web-UI |
+| Zählerwert lesen (Simple-API) | konfigurierbar (Standard 60 s) | Timer in `loop()` |
+| Node-Heartbeat (Adapter) | 60 s + beim Start | Timer in `loop()` |
+| Config+cmd-Poll (Adapter) | 15 s | Timer in `loop()` |
+| Discover (Adapter) | on-demand | Button im Einstellungen-Tab |
+| Carousel weiterschalten | konfigurierbar (Standard 10 s) | Timer in `loop()` |
 
 ---
 
-## 8 · Voraussetzungen am ioBroker
+## 10 · Voraussetzungen
 
-- **Simple-API Adapter** muss installiert und aktiv sein
-- Standard-Port: `8087` (im ESP32 Einstellungen-Tab konfigurierbar)
-- Simple-API muss `getStates`, `getPlainValue` und `set` unterstützen (alle Standard-Features)
-- `metermaster.metermaster` Adapter muss laufen (liefert die Zähler-States)
-
----
-
-## 9 · Adapter-TODOs (iobroker.metermaster >= v0.5.0)
-
-```
-[ ] nodes.{MAC}.* States automatisch anlegen wenn Node sich registriert
-[ ] nodes.{MAC}.config State als beschreibbar definieren (type: string)
-[ ] nodes.{MAC}.configAck auswerten (Bestätigung dass Config übernommen wurde)
-[ ] Admin-UI Tab "Nodes": Liste aller registrierten Nodes anzeigen
-[ ] Admin-UI: Config-State per Formular befüllen (Zählerauswahl + Carousel)
-[ ] Heartbeat-Überwachung: Alarm wenn lastSeen > 5 Minuten
-[ ] Optional: /api/nodeinfo direkt am ESP32 abfragen für Live-Status
-```
+- **ioBroker Simple-API Adapter** installiert und aktiv (Port 8087)
+- **iobroker.metermaster Adapter** >= v0.7.0 installiert und aktiv (Port 8089)
+- Zähler-Daten wurden bereits über die MeterMaster App in ioBroker synchronisiert
