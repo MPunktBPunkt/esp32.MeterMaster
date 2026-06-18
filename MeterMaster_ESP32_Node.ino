@@ -13,6 +13,8 @@
  *    - ArduinoJson          by Blanchon    >= 6.21
  *
  *  Changelog:
+ *    v0.4.2  – Zusaetzlicher ESP-Hub Heartbeat (Port 8093) fuer Dashboard-Sichtbarkeit
+ *              MeterMaster-Adapter (8089) bleibt unveraendert
  *    v0.4.1  – cmd-Verarbeitung: LED & Zähler per Adapter fernsteuern
  *              Heartbeat-Kachel im Dashboard; Adapter-Verbindungstest
  *              Bugfix: oledStyle wird jetzt persistent gespeichert (NVS "oStyl")
@@ -39,7 +41,7 @@
 #include <U8g2lib.h>
 #include <time.h>
 // ── Hardware ──────────────────────────────────────────────────────────────────
-#define FW_VERSION  "0.4.1"
+#define FW_VERSION  "0.4.2"
 #define GH_USER     "MPunktBPunkt"
 #define GH_REPO_ESP "esp32.MeterMaster"
 #define GH_REPO_IOB "iobroker.metermaster"
@@ -65,6 +67,7 @@ Preferences prefs;
 String iobHost      = "192.168.178.113";
 int    iobPort      = 8087;   // ioBroker simple-api (Zählerwerte lesen)
 int    adapterPort  = 8089;   // MeterMaster Adapter HTTP (Register, Config)
+int    hubPort      = 8093;   // ESP-Hub Adapter (Dashboard), 0 = aus
 String stateId      = "metermaster.0.MeinHaus.Westerheim.Warmwasser.readings.latest";
 String meterLabel   = "Warmwasser";
 String meterUnit    = "m³";
@@ -105,7 +108,10 @@ String nodeName         = "MeterMaster Node";
 unsigned long lastRegister   = 0;
 unsigned long lastRegisterOk = 0;  // millis() letzter erfolgreicher Heartbeat
 bool          registerOk     = false;
+bool          hubOk          = false;
 unsigned long lastConfigPoll = 0;
+unsigned long lastHubHeartbeat = 0;
+unsigned long lastHubOk        = 0;
 #define REGISTER_INTERVAL  60000   // alle 60s Heartbeat
 #define CONFIGPOLL_INTERVAL 15000  // alle 15s Config-Poll
 
@@ -404,6 +410,64 @@ void registerNode() {
   }
 }
 
+// Zusaetzlicher Heartbeat an iobroker.esp-hub (Port 8093) — nur fuer Dashboard-Sichtbarkeit.
+// Die MeterMaster-Funktionen (Config, cmd, Zaehler) laufen weiter ueber adapterPort (8089).
+void sendEspHubHeartbeat() {
+  if (iobHost.isEmpty() || hubPort <= 0) return;
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  DynamicJsonDocument doc(768);
+  doc["mac"]        = nodeMac;
+  doc["name"]       = nodeName;
+  doc["hwType"]     = "esp32";
+  doc["chipModel"]  = ESP.getChipModel();
+  doc["version"]    = FW_VERSION;
+  doc["ip"]         = WiFi.localIP().toString();
+  doc["rssi"]       = WiFi.RSSI();
+  doc["uptime"]     = millis() / 1000UL;
+  doc["freeHeap"]   = ESP.getFreeHeap();
+  doc["freeSketch"] = ESP.getFreeSketchSpace();
+
+  JsonObject ios = doc.createNestedObject("ios");
+  JsonObject vIo = ios.createNestedObject("value");
+  vIo["type"]  = "sensor";
+  vIo["value"] = currentValue;
+  vIo["unit"]  = meterUnit;
+  JsonObject cIo = ios.createNestedObject("carousel");
+  cIo["type"]  = "sensor";
+  cIo["value"] = carouselActive ? carouselCount : 1;
+  cIo["unit"]  = "";
+  JsonObject aIo = ios.createNestedObject("adapter");
+  aIo["type"]  = "sensor";
+  aIo["value"] = registerOk ? 1 : 0;
+  aIo["unit"]  = "";
+
+  String body;
+  serializeJson(doc, body);
+
+  HTTPClient http;
+  http.begin("http://" + iobHost + ":" + String(hubPort) + "/api/register");
+  http.addHeader("Content-Type", "application/json");
+  http.setTimeout(3000);
+  int code = http.POST(body);
+  String resp = http.getString();
+  http.end();
+
+  if (code == 200) {
+    hubOk     = true;
+    lastHubOk = millis();
+    StaticJsonDocument<256> rdoc;
+    if (!deserializeJson(rdoc, resp)) {
+      if (rdoc.containsKey("name") && !rdoc["name"].isNull()) {
+        String newName = rdoc["name"].as<String>();
+        if (newName.length() > 0 && newName != nodeName) nodeName = newName;
+      }
+    }
+  } else {
+    hubOk = false;
+  }
+}
+
 // Liest config vom MeterMaster Adapter – Adapter schreibt JSON rein
 // Format: {"sid":"metermaster.0.X","label":"Strom","unit":"kWh"}
 void pollConfig() {
@@ -518,6 +582,7 @@ void loadSettings() {
   iobHost        = prefs.getString("host",  "192.168.178.113");
   iobPort        = prefs.getInt   ("port",  8087);
   adapterPort    = prefs.getInt   ("aport", 8089);
+  hubPort        = prefs.getInt   ("hport", 8093);
   stateId        = prefs.getString("sid",   "metermaster.0.MeinHaus.Westerheim.Warmwasser.readings.latest");
   meterLabel     = prefs.getString("lbl",   "Warmwasser");
   meterUnit      = prefs.getString("unit",  "m³");
@@ -533,6 +598,7 @@ void saveSettings() {
   prefs.putString("host", iobHost);
   prefs.putInt   ("port", iobPort);
   prefs.putInt   ("aport",adapterPort);
+  prefs.putInt   ("hport", hubPort);
   prefs.putString("sid",  stateId);
   prefs.putString("lbl",  meterLabel);
   prefs.putString("unit", meterUnit);
@@ -765,9 +831,14 @@ const char H_DB[] PROGMEM = R"RAW(
       <div class="cell"><div class="k">Letztes Update</div><div class="v" id="dAge">–</div></div>
     </div>
     <div class="g2" style="margin-top:6px">
-      <div class="cell"><div class="k">📡 Adapter-Heartbeat</div>
+      <div class="cell"><div class="k">📡 MeterMaster Adapter</div>
         <div class="v"><span class="dot" id="dRegDot" style="background:#374151;border:2px solid #4b5563"></span><span id="dRegSt" style="font-size:.85rem">–</span></div></div>
-      <div class="cell"><div class="k">Letzter Heartbeat</div><div class="v" id="dRegAge" style="font-size:.85rem">–</div></div>
+      <div class="cell"><div class="k">Letzter Adapter-Ping</div><div class="v" id="dRegAge" style="font-size:.85rem">–</div></div>
+    </div>
+    <div class="g2" style="margin-top:6px">
+      <div class="cell"><div class="k">🏠 ESP-Hub</div>
+        <div class="v"><span class="dot" id="dHubDot" style="background:#374151;border:2px solid #4b5563"></span><span id="dHubSt" style="font-size:.85rem">–</span></div></div>
+      <div class="cell"><div class="k">Letzter Hub-Ping</div><div class="v" id="dHubAge" style="font-size:.85rem">–</div></div>
     </div>
     <div id="alarmBadge" class="alarm-badge alarm-off" style="margin-top:10px">
       <span id="alarmDot">🔔</span><span id="alarmTxt">Kein Alarm</span>
@@ -834,6 +905,17 @@ const char H_CFG[] PROGMEM = R"RAW(
       <button class="btn sm" style="margin-top:0;width:100%" onclick="discover()">🔍 Zähler laden</button>
     </div>
     <div id="alDisc" class="al"></div>
+  </div>
+  <div class="card">
+    <div class="h2"><i>🏠</i>ESP-Hub (Dashboard)</div>
+    <label>Port ESP-Hub</label>
+    <input id="cHPort" type="number" placeholder="8093">
+    <div style="font-size:.73rem;color:var(--mut);margin-top:6px">
+      Zeigt den Node im <a href="https://github.com/MPunktBPunkt/iobroker.esp-hub" target="_blank" style="color:var(--p2)">iobroker.esp-hub</a> Dashboard.
+      MeterMaster-Funktionen laufen weiter ueber Port 8089. Auf <code>0</code> setzen zum Deaktivieren.
+    </div>
+    <div id="alCfgHub" class="al" style="margin-top:8px"></div>
+    <button class="btn sec" style="margin-top:10px" onclick="testHub()">🔗 ESP-Hub testen</button>
   </div>
   <div class="card">
     <div class="h2"><i>📡</i>MeterMaster Adapter</div>
@@ -1289,6 +1371,22 @@ function refreshDash(){
       }
       regAge.textContent=d.lastRegisterAgo||'–';
     }
+    const hubDot=document.getElementById('dHubDot');
+    const hubSt=document.getElementById('dHubSt');
+    const hubAge=document.getElementById('dHubAge');
+    if(hubDot&&hubSt&&hubAge){
+      if(d.hubOk){
+        hubDot.style.background='#4CAF50';hubDot.style.border='2px solid #81C784';hubDot.style.boxShadow='0 0 6px #4CAF50';
+        hubSt.textContent='Im ESP-Hub sichtbar';hubSt.style.color='#A5D6A7';
+      } else if(d.hubPort>0) {
+        hubDot.style.background='#F44336';hubDot.style.border='2px solid #E57373';hubDot.style.boxShadow='none';
+        hubSt.textContent='Nicht im ESP-Hub';hubSt.style.color='#EF9A9A';
+      } else {
+        hubDot.style.background='#374151';hubDot.style.border='2px solid #4b5563';hubDot.style.boxShadow='none';
+        hubSt.textContent='Deaktiviert';hubSt.style.color='#9CA3AF';
+      }
+      hubAge.textContent=d.lastHubAgo||'–';
+    }
     // Dropdown vorbelegen
     const sel=document.getElementById('oSel');
     if(sel.options.length<=1&&d.stateId){
@@ -1301,6 +1399,14 @@ function refreshDash(){
   }).catch(()=>{});
 }
 setInterval(refreshDash,15000);
+
+function testHub(){
+  al('alCfgHub','inf','Verbinde mit ESP-Hub…');
+  const b={hubPort:+(document.getElementById('cHPort').value||8093)};
+  fetch('/api/testhub',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})
+    .then(r=>r.json()).then(d=>al('alCfgHub',d.ok?'ok':'err',d.ok?'✓ '+d.msg:'✗ '+d.msg,4000))
+    .catch(e=>al('alCfgHub','err','✗ '+e.message,4000));
+}
 
 function testAdapter(){
   al('alCfgAdapter','inf','Verbinde mit Adapter…');
@@ -1350,6 +1456,7 @@ function loadCfg(){
     document.getElementById('cHost').value=d.iobHost;
     document.getElementById('cPort').value=d.iobPort;
     document.getElementById('cAPort').value=d.adapterPort||8089;
+    document.getElementById('cHPort').value=(d.hubPort===undefined?8093:d.hubPort);
     document.getElementById('cSid').value=d.stateId;
     document.getElementById('cLbl').value=d.label;
     document.getElementById('cUnt').value=d.unit;
@@ -1360,6 +1467,7 @@ function saveCfg(){
   const b={iobHost:document.getElementById('cHost').value,
            iobPort:+document.getElementById('cPort').value,
            adapterPort:+(document.getElementById('cAPort').value||8089),
+           hubPort:+(document.getElementById('cHPort').value||8093),
            stateId:document.getElementById('cSid').value,
            label:document.getElementById('cLbl').value,
            unit:document.getElementById('cUnt').value,
@@ -1933,6 +2041,7 @@ void hRoot() { server.send(200,"text/html",buildPage()); }
 void hApiStatus() {
   String ago    = (lastFetch==0)?"Nie":(String((millis()-lastFetch)/1000)+" s");
   String regAgo = (lastRegisterOk==0)?"Nie":(String((millis()-lastRegisterOk)/1000)+" s");
+  String hubAgo = (lastHubOk==0)?"Nie":(String((millis()-lastHubOk)/1000)+" s");
   server.send(200,"application/json",
     "{\"ok\":"            + String(fetchOk?"true":"false")
     +",\"value\":"        + String(currentValue,4)
@@ -1949,7 +2058,10 @@ void hApiStatus() {
     +",\"alarmThreshold\":"+ String(alarmThreshold,2)
     +",\"alarmAbove\":"    + String(alarmAbove?"true":"false")
     +",\"registerOk\":"    + String(registerOk?"true":"false")
+    +",\"hubOk\":"         + String(hubOk?"true":"false")
+    +",\"hubPort\":"       + String(hubPort)
     +",\"lastRegisterAgo\":\"" + regAgo + "\""
+    +",\"lastHubAgo\":\""   + hubAgo + "\""
     +",\"ip\":\""          + WiFi.localIP().toString() +"\"}");
 }
 
@@ -1958,6 +2070,7 @@ void hApiGetSettings() {
     "{\"iobHost\":\""     + iobHost   +"\""
     +",\"iobPort\":"      + String(iobPort)
     +",\"adapterPort\":"  + String(adapterPort)
+    +",\"hubPort\":"      + String(hubPort)
     +",\"stateId\":\""    + stateId   +"\""
     +",\"label\":\""      + meterLabel+"\""
     +",\"unit\":\""       + meterUnit +"\""
@@ -1974,6 +2087,7 @@ void hApiPostSettings() {
   if (!doc["iobHost"].isNull()) iobHost      = doc["iobHost"].as<String>();
   if (!doc["iobPort"].isNull()) iobPort      = doc["iobPort"].as<int>();
   if (!doc["adapterPort"].isNull()) adapterPort = doc["adapterPort"].as<int>();
+  if (!doc["hubPort"].isNull()) hubPort = doc["hubPort"].as<int>();
   if (!doc["stateId"].isNull()) stateId    = doc["stateId"].as<String>();
   if (!doc["label"].isNull())   meterLabel = doc["label"].as<String>();
   if (!doc["unit"].isNull())    meterUnit  = doc["unit"].as<String>();
@@ -2042,6 +2156,43 @@ void hApiTestAdapter() {
     if (!deserializeJson(resp, http.getString(), DeserializationOption::Filter(f))) {
       ver = resp["current"] | "?";
       ok = true; msg = "Adapter v" + ver + " erreichbar";
+    } else { msg = "JSON-Fehler"; }
+  } else if (code < 0) {
+    msg = "Keine Verbindung zu " + iobHost + ":" + String(tp);
+  } else {
+    msg = "HTTP " + String(code);
+  }
+  http.end();
+  server.send(200, "application/json",
+    "{\"ok\":" + String(ok?"true":"false") + ",\"version\":\"" + ver + "\",\"msg\":\"" + msg + "\"}");
+}
+
+void hApiTestHub() {
+  int tp = hubPort;
+  if (server.hasArg("plain")) {
+    DynamicJsonDocument doc(128);
+    if (!deserializeJson(doc, server.arg("plain")))
+      if (!doc["hubPort"].isNull()) tp = doc["hubPort"].as<int>();
+  }
+  if (tp <= 0) {
+    server.send(200, "application/json", "{\"ok\":false,\"msg\":\"ESP-Hub deaktiviert (Port 0)\"}"); return;
+  }
+  if (WiFi.status() != WL_CONNECTED) {
+    server.send(200, "application/json", "{\"ok\":false,\"msg\":\"WLAN getrennt\"}"); return;
+  }
+  HTTPClient http;
+  http.begin("http://" + iobHost + ":" + String(tp) + "/api/version");
+  http.setTimeout(5000);
+  int code = http.GET();
+  String ver = "?";
+  bool ok = false;
+  String msg;
+  if (code == 200) {
+    StaticJsonDocument<64> f; f["current"] = true;
+    DynamicJsonDocument resp(256);
+    if (!deserializeJson(resp, http.getString(), DeserializationOption::Filter(f))) {
+      ver = resp["current"] | "?";
+      ok = true; msg = "ESP-Hub v" + ver + " erreichbar";
     } else { msg = "JSON-Fehler"; }
   } else if (code < 0) {
     msg = "Keine Verbindung zu " + iobHost + ":" + String(tp);
@@ -2257,6 +2408,7 @@ void setup() {
   server.on("/api/alarm",    HTTP_POST, hApiPostAlarm);
   server.on("/api/test",        HTTP_POST, hApiTestConn);
   server.on("/api/testadapter", HTTP_POST, hApiTestAdapter);
+  server.on("/api/testhub",      HTTP_POST, hApiTestHub);
   server.on("/api/oled",     HTTP_POST, hApiOled);
   server.on("/api/discover", HTTP_GET,  hApiDiscover);
   server.on("/api/led",      HTTP_GET,  hApiLed);
@@ -2276,7 +2428,9 @@ void setup() {
   addLog("Gestart. IP: " + WiFi.localIP().toString() + " MAC: " + nodeMac);
   loadCarousel();
   registerNode();
-  lastRegister   = millis();
+  sendEspHubHeartbeat();
+  lastRegister     = millis();
+  lastHubHeartbeat = millis();
   lastConfigPoll = millis();
   server.begin();
   doFetch();
@@ -2293,7 +2447,10 @@ void loop() {
   handleCarousel();
   // ioBroker Heartbeat
   if (millis()-lastRegister >= REGISTER_INTERVAL) {
-    registerNode(); lastRegister = millis();
+    registerNode();
+    sendEspHubHeartbeat();
+    lastRegister = millis();
+    lastHubHeartbeat = millis();
   }
   // Config-Poll (ioBroker → ESP32)
   if (millis()-lastConfigPoll >= CONFIGPOLL_INTERVAL) {
@@ -2306,4 +2463,3 @@ void loop() {
     handleBlink();
   }
 }
-
