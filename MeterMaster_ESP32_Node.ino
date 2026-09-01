@@ -13,8 +13,8 @@
  *    - ArduinoJson          by Blanchon    >= 6.21
  *
  *  Changelog:
- *    v0.4.2  – Zusaetzlicher ESP-Hub Heartbeat (Port 8093) fuer Dashboard-Sichtbarkeit
- *              MeterMaster-Adapter (8089) bleibt unveraendert
+ *    v0.4.3  – Zähler laden via Adapter /api/discover; ConfigAck nur bei echter Änderung;
+ *              Heartbeat-Register nur noch Serial (kein Log-Spam)
  *    v0.4.1  – cmd-Verarbeitung: LED & Zähler per Adapter fernsteuern
  *              Heartbeat-Kachel im Dashboard; Adapter-Verbindungstest
  *              Bugfix: oledStyle wird jetzt persistent gespeichert (NVS "oStyl")
@@ -41,7 +41,7 @@
 #include <U8g2lib.h>
 #include <time.h>
 // ── Hardware ──────────────────────────────────────────────────────────────────
-#define FW_VERSION  "0.4.2"
+#define FW_VERSION  "0.4.3"
 #define GH_USER     "MPunktBPunkt"
 #define GH_REPO_ESP "esp32.MeterMaster"
 #define GH_REPO_IOB "iobroker.metermaster"
@@ -401,7 +401,6 @@ void registerNode() {
   if (code == 200) {
     registerOk     = true;
     lastRegisterOk = millis();
-    addLog("Node registriert: " + nodeMac);
     Serial.println("Node registered: " + nodeMac);
   } else {
     registerOk = false;
@@ -532,26 +531,36 @@ void pollConfig() {
   }
   if (doc.containsKey("carouselSec")) {
     int s = doc["carouselSec"].as<int>();
-    if (s > 0) carouselSec = s;
-    changed = true;
+    if (s > 0 && s != carouselSec) { carouselSec = s; changed = true; }
   }
   if (doc.containsKey("carouselActive")) {
-    carouselActive = doc["carouselActive"].as<bool>();
-    changed = true;
+    bool ca = doc["carouselActive"].as<bool>();
+    if (ca != carouselActive) { carouselActive = ca; changed = true; }
   }
   if (doc.containsKey("carousel") && doc["carousel"].is<JsonArray>()) {
     JsonArray arr = doc["carousel"].as<JsonArray>();
-    carouselCount = 0;
-    for (JsonObject e : arr) {
-      if (carouselCount >= CAROUSEL_MAX) break;
-      carousel[carouselCount].sid   = e["sid"]   | "";
-      carousel[carouselCount].label = e["label"] | "";
-      carousel[carouselCount].unit  = e["unit"]  | "";
-      carousel[carouselCount].val   = 0;
-      carousel[carouselCount].ok    = false;
-      carouselCount++;
+    bool carouselDiff = arr.size() != (size_t)carouselCount;
+    if (!carouselDiff) {
+      for (size_t i = 0; i < arr.size() && !carouselDiff; i++) {
+        JsonObject e = arr[i];
+        carouselDiff = carousel[i].sid   != String(e["sid"]   | "")
+                    || carousel[i].label != String(e["label"] | "")
+                    || carousel[i].unit  != String(e["unit"]  | "");
+      }
     }
-    changed = true;
+    if (carouselDiff) {
+      carouselCount = 0;
+      for (JsonObject e : arr) {
+        if (carouselCount >= CAROUSEL_MAX) break;
+        carousel[carouselCount].sid   = e["sid"]   | "";
+        carousel[carouselCount].label = e["label"] | "";
+        carousel[carouselCount].unit  = e["unit"]  | "";
+        carousel[carouselCount].val   = 0;
+        carousel[carouselCount].ok    = false;
+        carouselCount++;
+      }
+      changed = true;
+    }
   }
 
   if (changed) {
@@ -2214,37 +2223,93 @@ void hApiOled() {
   server.send(200,"application/json","{\"ok\":true}");
 }
 
+static void appendDiscoverState(String &r, bool &first, const String &sid, float val, String lbl, String unit) {
+  String escSid = sid; escSid.replace("\"","\\\"");
+  String escLbl = lbl; escLbl.replace("\"","\\\"");
+  String escUnit = unit; escUnit.replace("\"","\\\"");
+  if (!first) r += ",";
+  r += "{\"id\":\"" + escSid + "\",\"val\":" + String(val, 3) + ",\"label\":\"" + escLbl + "\",\"unit\":\"" + escUnit + "\"}";
+  first = false;
+}
+
 void hApiDiscover() {
   if (WiFi.status()!=WL_CONNECTED){server.send(503,"application/json","{\"ok\":false,\"msg\":\"WLAN getrennt\"}");return;}
   if (ESP.getFreeHeap()<10000){server.send(200,"application/json",
     "{\"ok\":false,\"msg\":\"Heap zu knapp ("+String(ESP.getFreeHeap()/1024)+" KB)\"}");return;}
+
   HTTPClient http;
-  http.begin("http://"+iobHost+":"+String(iobPort)+"/getStates/metermaster.*"); http.setTimeout(8000);
-  int code=http.GET();
-  if(code!=200){http.end();server.send(200,"application/json",
-    "{\"ok\":false,\"msg\":\"HTTP "+String(code)+" – simple-api aktiv?\"}");return;}
-  String body=http.getString(); http.end();
-  DynamicJsonDocument doc(16384); doc.clear();
-  if(deserializeJson(doc,body)){server.send(200,"application/json","{\"ok\":false,\"msg\":\"JSON-Fehler\"}");return;}
-  String r="{\"ok\":true,\"states\":["; bool first=true;
-  for(JsonPair kv:doc.as<JsonObject>()){
-    String sid=kv.key().c_str(); JsonVariant sv=kv.value();
-    if(sv["val"].isNull()) continue;
-    if(!sv["val"].is<float>()&&!sv["val"].is<int>()) continue;
-    float val=sv["val"].as<float>();
-    String lbl=sid; int d2=sid.indexOf('.',sid.indexOf('.')+1);
-    if(d2>=0) lbl=sid.substring(d2+1); lbl.replace("."," · ");
-    String unit=""; String sl=sid; sl.toLowerCase();
-    if(sl.indexOf("strom")>=0||sl.indexOf("kwh")>=0) unit="kWh";
-    else if(sl.indexOf("gas")>=0) unit="m³";
-    else if(sl.indexOf("wasser")>=0||sl.indexOf("water")>=0) unit="m³";
-    else if(sl.indexOf("waerm")>=0) unit="kWh";
-    sid.replace("\"","\\\""); lbl.replace("\"","\\\"");
-    if(!first)r+=",";
-    r+="{\"id\":\""+sid+"\",\"val\":"+String(val,3)+",\"label\":\""+lbl+"\",\"unit\":\""+unit+"\"}";
-    first=false;
+  if (adapterPort > 0) {
+    http.begin("http://" + iobHost + ":" + String(adapterPort) + "/api/discover");
+    http.setTimeout(8000);
+    int code = http.GET();
+    if (code == 200) {
+      String body = http.getString();
+      http.end();
+      DynamicJsonDocument doc(8192);
+      if (!deserializeJson(doc, body) && doc.is<JsonArray>()) {
+        String r = "{\"ok\":true,\"states\":[";
+        bool first = true;
+        for (JsonObject item : doc.as<JsonArray>()) {
+          String sid = item["stateId"] | "";
+          if (sid.isEmpty()) continue;
+          float val = item["latest"].isNull() ? 0 : item["latest"].as<float>();
+          String meter = item["meter"] | item["label"] | "";
+          String house = item["house"] | "";
+          String apt = item["apartment"] | "";
+          String lbl = house;
+          if (!apt.isEmpty()) { if (!lbl.isEmpty()) lbl += " · "; lbl += apt; }
+          if (!meter.isEmpty()) { if (!lbl.isEmpty()) lbl += " · "; lbl += meter; }
+          appendDiscoverState(r, first, sid, val, lbl, item["unit"] | "");
+        }
+        r += "]}";
+        server.send(200, "application/json", r);
+        return;
+      }
+    } else {
+      http.end();
+    }
   }
-  r+="]}"; server.send(200,"application/json",r);
+
+  http.begin("http://" + iobHost + ":" + String(iobPort) + "/getStates/metermaster.0.*.readings.latest");
+  http.setTimeout(8000);
+  int code = http.GET();
+  if (code != 200) {
+    http.end();
+    server.send(200, "application/json",
+      "{\"ok\":false,\"msg\":\"HTTP " + String(code) + " – simple-api aktiv?\"}");
+    return;
+  }
+  String body = http.getString();
+  http.end();
+  DynamicJsonDocument doc(8192);
+  doc.clear();
+  if (deserializeJson(doc, body)) {
+    server.send(200, "application/json", "{\"ok\":false,\"msg\":\"JSON-Fehler\"}");
+    return;
+  }
+  String r = "{\"ok\":true,\"states\":[";
+  bool first = true;
+  for (JsonPair kv : doc.as<JsonObject>()) {
+    String sid = kv.key().c_str();
+    JsonVariant sv = kv.value();
+    if (sv["val"].isNull()) continue;
+    if (!sv["val"].is<float>() && !sv["val"].is<int>()) continue;
+    float val = sv["val"].as<float>();
+    String lbl = sid;
+    int d2 = sid.indexOf('.', sid.indexOf('.') + 1);
+    if (d2 >= 0) lbl = sid.substring(d2 + 1);
+    lbl.replace(".", " · ");
+    String unit = "";
+    String sl = sid;
+    sl.toLowerCase();
+    if (sl.indexOf("strom") >= 0 || sl.indexOf("kwh") >= 0) unit = "kWh";
+    else if (sl.indexOf("gas") >= 0) unit = "m³";
+    else if (sl.indexOf("wasser") >= 0 || sl.indexOf("water") >= 0) unit = "m³";
+    else if (sl.indexOf("waerm") >= 0) unit = "kWh";
+    appendDiscoverState(r, first, sid, val, lbl, unit);
+  }
+  r += "]}";
+  server.send(200, "application/json", r);
 }
 
 
