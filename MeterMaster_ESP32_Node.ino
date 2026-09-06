@@ -1,6 +1,6 @@
 /*
  * ============================================================
- *  MeterMaster ESP32 Display Node  –  v0.4.1
+ *  MeterMaster ESP32 Display Node  –  v0.4.3
  *  Hardware: ESP32 D1 Mini + 64×48 OLED (SSD1306, I²C)
  * ============================================================
  *
