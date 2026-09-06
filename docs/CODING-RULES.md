@@ -1,6 +1,6 @@
 # CODING-RULES – MeterMaster ESP32 Node
 > Fokus: Lesbarkeit · Dokumentation · Wartbarkeit  
-> Gilt für: `MeterMaster_ESP32_Node.ino` und alle zukünftigen `.ino`/`.h` Dateien
+> Gilt für: `esp32.MeterMaster.ino` und alle zukünftigen `.ino`/`.h` Dateien
 
 ---
 

@@ -52,11 +52,21 @@ Der MeterMaster ESP32 Node holt Zählerstände aus ioBroker und zeigt sie auf ei
 
 ## Quickstart
 
-1. `MeterMaster_ESP32_Node.ino` flashen
+1. `esp32.MeterMaster.ino` flashen (oder vorkompilierte `.bin`, siehe unten)
 2. Hotspot **`MeterMaster-Setup`** → WLAN konfigurieren
 3. Web-UI: `http://<ESP-IP>/`
 4. **Einstellungen:** ioBroker-Host, Simple-API (8087), Adapter (8089), ESP-Hub (8093)
 5. Zähler laden oder State-ID manuell eingeben
+
+---
+
+## Vorkompilierte Firmware
+
+Schema: `{name}.{version}.{family}.bin`
+
+| Datei | Board |
+|-------|-------|
+| `metermaster.0.4.3.esp32.bin` | ESP32 / D1 Mini |
 
 ---
 
