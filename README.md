@@ -36,6 +36,16 @@ Der MeterMaster ESP32 Node holt Zählerstände aus ioBroker und zeigt sie auf ei
 | SDA / SCL | GPIO 21 / 22 |
 | LED | GPIO 2 (active HIGH) |
 
+### Referenzaufbau (D1 Mini + 0,66″ OLED)
+
+| Gesamtansicht | Display | Seitenansicht |
+|:---:|:---:|:---:|
+| <img src="docs/hardware/esp32-d1-mini-oled-1.jpg" width="280" alt="MeterMaster Node – Gesamtansicht"> | <img src="docs/hardware/esp32-d1-mini-oled-2.jpg" width="280" alt="OLED-Anzeige"> | <img src="docs/hardware/esp32-d1-mini-oled-3.jpg" width="280" alt="MeterMaster Node – Seite"> |
+
+| Board (ohne Display) |
+|:---:|
+| <img src="docs/hardware/esp32-d1-mini-top.jpg" width="360" alt="ESP32 D1 Mini – Oberseite"> |
+
 ---
 
 ## Voraussetzungen
