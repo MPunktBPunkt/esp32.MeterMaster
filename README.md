@@ -1,6 +1,6 @@
 # esp32.MeterMaster
 
-![Version](https://img.shields.io/badge/version-0.4.3-blue)
+![Version](https://img.shields.io/badge/version-0.5.0-blue)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Donate](https://img.shields.io/badge/Donate-PayPal-00457C.svg?logo=paypal)](https://www.paypal.com/donate/?business=martin%40bchmnn.de&currency_code=EUR)
 
@@ -58,6 +58,9 @@ Der MeterMaster ESP32 Node holt Zählerstände aus ioBroker und zeigt sie auf ei
 
 **Board:** WEMOS D1 MINI ESP32
 
+**Web-UI:** `web/index.html` → `python3 tools/pack_ui.py` → `src/web/UiPagesGz.h`.  
+Build: gesamten Ordner mit `arduino-cli` und `--build-property 'compiler.cpp.extra_flags=-Isrc'`.
+
 ---
 
 ## Quickstart
@@ -76,7 +79,7 @@ Schema: `{name}.{version}.{family}.bin`
 
 | Datei | Board |
 |-------|-------|
-| `metermaster.0.4.3.esp32.bin` | ESP32 / D1 Mini |
+| `metermaster.0.5.0.esp32.bin` | ESP32 / D1 Mini |
 
 ---
 

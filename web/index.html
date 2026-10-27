@@ -1,0 +1,1229 @@
+<!DOCTYPE html>
+<html lang="de"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MeterMaster Node</title><style>
+:root{--bg:#0d0b14;--card:#18152a;--brd:#2d2545;--pri:#8b5cf6;--ph:#7c3aed;
+      --p2:#a78bfa;--ok:#22c55e;--err:#ef4444;--warn:#f59e0b;
+      --txt:#f1f5f9;--mut:#8b89a0;--r:10px}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--txt);font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh}
+.bar{background:var(--card);border-bottom:1px solid var(--brd);padding:12px 16px;
+     display:flex;align-items:center;gap:11px}
+.bar .ico{width:32px;height:32px;background:linear-gradient(135deg,#7c3aed,#a78bfa);
+          border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:17px}
+.bar h1{font-size:.95rem;font-weight:700;background:linear-gradient(90deg,#a78bfa,#c4b5fd);
+        -webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.bar .ip{font-size:.7rem;color:var(--mut);margin-left:auto}
+.tabs{display:flex;background:var(--card);border-bottom:1px solid var(--brd);
+      padding:0 12px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.tab{padding:10px 12px;cursor:pointer;border-bottom:2px solid transparent;
+     font-size:.78rem;color:var(--mut);user-select:none;white-space:nowrap;flex-shrink:0;transition:all .15s}
+.tab.act{color:var(--p2);border-bottom-color:var(--pri)}
+.tab:hover:not(.act){color:var(--txt)}
+.pg{display:none;padding:18px 14px;max-width:560px;margin:0 auto}
+.pg.act{display:block}
+.card{background:var(--card);border:1px solid var(--brd);border-radius:var(--r);padding:16px;margin-bottom:12px}
+.card.acc{border-color:#3d2d6a;background:linear-gradient(135deg,#18152a 60%,#1e1535)}
+.h2{font-size:.73rem;color:var(--mut);text-transform:uppercase;letter-spacing:.07em;
+    margin-bottom:12px;display:flex;align-items:center;gap:6px}
+.h2 i{display:inline-flex;width:18px;height:18px;background:rgba(139,92,246,.18);
+       border-radius:4px;align-items:center;justify-content:center;font-size:11px;font-style:normal}
+.vdisp{text-align:center;padding:12px 0 4px}
+.vnum{font-size:2.4rem;font-weight:800;background:linear-gradient(135deg,#a78bfa,#c4b5fd);
+      -webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.vu{font-size:.9rem;color:var(--mut);margin-left:3px}
+.vlbl{font-size:.8rem;color:var(--mut);margin-top:2px}
+.vts{font-size:.72rem;color:var(--p2);margin-top:4px;opacity:.85}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.cell{background:rgba(0,0,0,.25);border:1px solid var(--brd);border-radius:7px;padding:8px 11px}
+.cell .k{font-size:.68rem;color:var(--mut);margin-bottom:2px}
+.cell .v{font-size:.85rem;font-weight:600}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;vertical-align:middle}
+.dok{background:var(--ok)}.derr{background:var(--err)}.dwarn{background:var(--warn)}
+/* Inputs */
+label{display:block;font-size:.78rem;color:var(--mut);margin:11px 0 4px}
+label:first-child{margin-top:0}
+input,select{width:100%;padding:7px 10px;background:rgba(0,0,0,.3);border:1px solid var(--brd);
+      border-radius:7px;color:var(--txt);font-size:.85rem;outline:none;transition:border .15s;
+      -webkit-appearance:none;appearance:none}
+input:focus,select:focus{border-color:var(--pri)}
+select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%238b89a0' d='M0 0l5 6 5-6z'/%3E%3C/svg%3E");
+       background-repeat:no-repeat;background-position:right 10px center;padding-right:28px}
+select option{background:#18152a}
+.r2{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.r3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px}
+/* Buttons */
+.btn{display:block;width:100%;padding:9px;background:linear-gradient(135deg,#7c3aed,#8b5cf6);
+     color:#fff;border:none;border-radius:7px;cursor:pointer;font-size:.85rem;font-weight:600;
+     margin-top:11px;transition:opacity .15s;text-align:center}
+.btn:hover{opacity:.87}
+.btn.sec{background:transparent;border:1px solid var(--brd);color:var(--mut);margin-top:11px}
+.btn.sec:hover{border-color:var(--pri);color:var(--p2)}
+.btn.sm{padding:6px 12px;margin-top:0;width:auto;display:inline-block;font-size:.78rem}
+.btn.red{background:linear-gradient(135deg,#991b1b,#ef4444)}
+.btn.grn{background:linear-gradient(135deg,#166534,#22c55e)}
+.row-btn{display:flex;gap:7px;align-items:flex-end}
+.row-btn select,.row-btn input{flex:1;min-width:0}
+/* Alerts */
+.al{padding:8px 12px;border-radius:7px;font-size:.8rem;margin:8px 0;display:none}
+.al.show{display:block}
+.al-ok{background:#14532d;color:#86efac;border:1px solid #166534}
+.al-err{background:#450a0a;color:#fca5a5;border:1px solid #7f1d1d}
+.al-inf{background:#1e1854;color:#a5b4fc;border:1px solid #3730a3}
+.al-warn{background:#451a03;color:#fcd34d;border:1px solid #78350f}
+/* WLAN */
+.sigbar{display:flex;align-items:flex-end;gap:2px;height:16px}
+.sigbar span{width:6px;background:var(--brd);border-radius:2px}
+.sigbar span.on{background:var(--pri)}
+.sigbar span:nth-child(1){height:25%}.sigbar span:nth-child(2){height:50%}
+.sigbar span:nth-child(3){height:75%}.sigbar span:nth-child(4){height:100%}
+.ring-wrap{position:relative;width:58px;height:58px;flex-shrink:0}
+.ring-wrap svg{transform:rotate(-90deg)}
+.rbg{fill:none;stroke:var(--brd);stroke-width:6}
+.rfg{fill:none;stroke:var(--pri);stroke-width:6;stroke-linecap:round;transition:stroke-dashoffset .4s}
+.rpct{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+      font-size:.7rem;font-weight:700;color:var(--p2)}
+.irow{display:flex;justify-content:space-between;align-items:center;
+      padding:7px 0;border-bottom:1px solid var(--brd);font-size:.84rem}
+.irow:last-child{border-bottom:none}
+.irow .ik{color:var(--mut);font-size:.77rem}
+.irow .iv{font-weight:600;text-align:right}
+/* OTA */
+.drop{border:2px dashed var(--brd);border-radius:var(--r);padding:30px 18px;
+      text-align:center;color:var(--mut);cursor:pointer;transition:all .15s}
+.drop:hover,.drop.ov{border-color:var(--pri);background:rgba(139,92,246,.05)}
+.drop .ei{font-size:1.8rem;margin-bottom:6px}
+.drop .fn{margin-top:8px;font-size:.75rem;color:var(--p2)}
+.pb{height:6px;background:var(--brd);border-radius:3px;overflow:hidden;margin-top:10px;display:none}
+.pb.show{display:block}
+.pbi{height:100%;width:0%;background:linear-gradient(90deg,#7c3aed,#a78bfa);border-radius:3px;transition:width .15s}
+/* BLE */
+.ble-item{background:rgba(0,0,0,.2);border:1px solid var(--brd);border-radius:7px;
+           padding:8px 11px;margin-bottom:6px;font-size:.8rem}
+.ble-item .bn{font-weight:600;color:var(--p2)}
+.ble-item .ba{color:var(--mut);font-size:.73rem;margin-top:2px;word-break:break-all}
+.ble-item .br{color:var(--mut);font-size:.73rem}
+/* Alarm */
+.thr-row{display:flex;align-items:center;gap:8px;margin-top:4px}
+.thr-row input{flex:1}
+.alarm-badge{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;
+             border-radius:20px;font-size:.75rem;font-weight:600}
+.alarm-off{background:rgba(0,0,0,.2);color:var(--mut);border:1px solid var(--brd)}
+.alarm-on{background:rgba(239,68,68,.15);color:#fca5a5;border:1px solid #7f1d1d}
+.pulse{animation:pulse 1s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.style-btn{background:rgba(0,0,0,.25);border:2px solid var(--brd);border-radius:8px;padding:8px 6px;text-align:center;cursor:pointer;font-size:.75rem;font-weight:600;transition:all .15s}
+.style-btn:hover{border-color:var(--pri)}
+.style-btn.act{border-color:var(--pri);background:rgba(139,92,246,.15);color:var(--p2)}
+.sico{font-size:1.2rem;margin-bottom:3px}
+.sdesc{font-size:.65rem;color:var(--mut);font-weight:400;margin-top:2px}
+</style></head><body>
+<div class="bar">
+  <div class="ico">⚡</div><h1>MeterMaster Node</h1>
+  <span class="ip" id="topIp"></span>
+</div>
+<div class="tabs">
+  <div class="tab act" onclick="tab('db')">Dashboard</div>
+  <div class="tab"     onclick="tab('cfg')">Einstellungen</div>
+  <div class="tab"     onclick="tab('wl')">WLAN</div>
+  <div class="tab"     onclick="tab('al')">Alarm</div>
+  <div class="tab"     onclick="tab('bt')">Bluetooth</div>
+  <div class="tab"     onclick="tab('car')">Carousel</div>
+  <div class="tab"     onclick="tab('dbg')">Debug</div>
+  <div class="tab"     onclick="tab('ota')">OTA</div>
+  <div class="tab"     onclick="tab('info')">Info</div>
+</div>
+
+<div id="db" class="pg act">
+  <div class="card acc">
+    <div class="h2"><i>📊</i>Aktueller Zählerwert</div>
+    <div class="vdisp">
+      <div><span class="vnum" id="dVal">–</span><span class="vu" id="dUnit"></span></div>
+      <div class="vlbl" id="dLbl"></div>
+      <div class="vts" id="dTs">Ablesung: –</div>
+    </div>
+    <div class="g2">
+      <div class="cell"><div class="k">Status</div>
+        <div class="v"><span class="dot derr" id="dDot"></span><span id="dSt">...</span></div></div>
+      <div class="cell"><div class="k">Letztes Update</div><div class="v" id="dAge">–</div></div>
+    </div>
+    <div class="g2" style="margin-top:6px">
+      <div class="cell"><div class="k">📡 MeterMaster Adapter</div>
+        <div class="v"><span class="dot" id="dRegDot" style="background:#374151;border:2px solid #4b5563"></span><span id="dRegSt" style="font-size:.85rem">–</span></div></div>
+      <div class="cell"><div class="k">Letzter Adapter-Ping</div><div class="v" id="dRegAge" style="font-size:.85rem">–</div></div>
+    </div>
+    <div class="g2" style="margin-top:6px">
+      <div class="cell"><div class="k">🏠 ESP-Hub</div>
+        <div class="v"><span class="dot" id="dHubDot" style="background:#374151;border:2px solid #4b5563"></span><span id="dHubSt" style="font-size:.85rem">–</span></div></div>
+      <div class="cell"><div class="k">Letzter Hub-Ping</div><div class="v" id="dHubAge" style="font-size:.85rem">–</div></div>
+    </div>
+    <div id="alarmBadge" class="alarm-badge alarm-off" style="margin-top:10px">
+      <span id="alarmDot">🔔</span><span id="alarmTxt">Kein Alarm</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="h2"><i>💡</i>Rote LED</div>
+    <div style="display:flex;align-items:center;gap:12px">
+      <button id="ledBtn" class="btn" style="margin-top:0;flex:1" onclick="toggleLed()">LED einschalten</button>
+      <div style="text-align:center;min-width:44px">
+        <div id="ledDot" style="width:16px;height:16px;border-radius:50%;background:#374151;
+             border:2px solid #4b5563;margin:0 auto;transition:all .3s"></div>
+        <div id="ledLbl" style="font-size:.68rem;color:var(--mut);margin-top:3px">Aus</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="h2"><i>🖥</i>OLED Zähler &amp; Stil</div>
+    <label>Zähler auswählen</label>
+    <select id="oSel" onchange="oSelChange()">
+      <option value="">– Zähler in Einstellungen laden –</option>
+    </select>
+    <label style="margin-top:10px">Bezeichnung (OLED)</label>
+    <div class="r2">
+      <input id="oLbl" placeholder="Bezeichnung">
+      <input id="oUnt" placeholder="Einheit">
+    </div>
+    <label>Display-Stil</label>
+    <div class="g2" id="styleGrid" style="gap:6px">
+      <div class="style-btn act" data-s="0" onclick="setStyle(0)">
+        <div class="sico">☰</div><div>Standard</div><div class="sdesc">Label+Wert+Zeit+Datum</div>
+      </div>
+      <div class="style-btn" data-s="1" onclick="setStyle(1)">
+        <div class="sico">🔢</div><div>Groß</div><div class="sdesc">Großer Wert, kein Datum</div>
+      </div>
+      <div class="style-btn" data-s="2" onclick="setStyle(2)">
+        <div class="sico">◻</div><div>Minimal</div><div class="sdesc">Nur Wert + Einheit</div>
+      </div>
+      <div class="style-btn" data-s="3" onclick="setStyle(3)">
+        <div class="sico">◼</div><div>Invertiert</div><div class="sdesc">Weiß auf Schwarz</div>
+      </div>
+    </div>
+    <button class="btn" onclick="saveOled()">Auf OLED anwenden &amp; speichern</button>
+    <div id="alOled" class="al"></div>
+  </div>
+</div>
+
+<div id="cfg" class="pg">
+  <div id="alCfg" class="al"></div>
+  <div class="card">
+    <div class="h2"><i>🔌</i>ioBroker Simple-API</div>
+    <label>Host / IP</label>
+    <input id="cHost" placeholder="192.168.178.113">
+    <div class="r2">
+      <div><label>Port Simple-API</label><input id="cPort" type="number" placeholder="8087"></div>
+      <div><label>Intervall (s)</label><input id="cInt" type="number"></div>
+    </div>
+    <div class="r2" style="margin-top:11px">
+      <button class="btn sec" style="margin-top:0" onclick="testConn()">🔗 Verbindung testen</button>
+      <button class="btn sm" style="margin-top:0;width:100%" onclick="discover()">🔍 Zähler laden</button>
+    </div>
+    <div id="alDisc" class="al"></div>
+  </div>
+  <div class="card">
+    <div class="h2"><i>🏠</i>ESP-Hub (Dashboard)</div>
+    <label>Port ESP-Hub</label>
+    <input id="cHPort" type="number" placeholder="8093">
+    <div style="font-size:.73rem;color:var(--mut);margin-top:6px">
+      Zeigt den Node im <a href="https://github.com/MPunktBPunkt/iobroker.esp-hub" target="_blank" style="color:var(--p2)">iobroker.esp-hub</a> Dashboard.
+      MeterMaster-Funktionen laufen weiter ueber Port 8089. Auf <code>0</code> setzen zum Deaktivieren.
+    </div>
+    <div id="alCfgHub" class="al" style="margin-top:8px"></div>
+    <button class="btn sec" style="margin-top:10px" onclick="testHub()">🔗 ESP-Hub testen</button>
+  </div>
+  <div class="card">
+    <div class="h2"><i>📡</i>MeterMaster Adapter</div>
+    <label>Port Adapter</label>
+    <input id="cAPort" type="number" placeholder="8089">
+    <div id="alCfgAdapter" class="al" style="margin-top:8px"></div>
+    <button class="btn sec" style="margin-top:10px" onclick="testAdapter()">🔗 Adapter testen</button>
+  </div>
+  <div class="card">
+    <div class="h2"><i>🔢</i>Verfügbare Zähler</div>
+    <div class="row-btn">
+      <select id="discSel" onchange="discSelect()">
+        <option value="">– erst "Zähler laden" klicken –</option>
+      </select>
+    </div>
+    <div id="discMeta" style="font-size:.73rem;color:var(--mut);margin-top:5px;min-height:14px"></div>
+    <label style="margin-top:12px">State-ID (manuell)</label>
+    <input id="cSid">
+    <div class="r2">
+      <div><label>Bezeichnung</label><input id="cLbl"></div>
+      <div><label>Einheit</label><input id="cUnt"></div>
+    </div>
+    <button class="btn" onclick="saveCfg()">💾 Einstellungen speichern</button>
+  </div>
+  <div class="card">
+    <div class="h2"><i>🔗</i>MeterMaster ioBroker Adapter</div>
+    <div class="irow"><span class="ik">Adapter Version</span><span class="iv" id="adapterVerVal" style="font-size:.78rem;color:var(--p2)">Prüfe…</span></div>
+    <div class="irow"><span class="ik">GitHub</span><a href="https://github.com/MPunktBPunkt/iobroker.metermaster" target="_blank" style="font-size:.78rem;color:var(--p2);text-decoration:none">MPunktBPunkt/iobroker.metermaster ↗</a></div>
+    <div class="irow"><span class="ik">npm</span><a href="https://www.npmjs.com/package/iobroker.metermaster" target="_blank" style="font-size:.78rem;color:var(--p2);text-decoration:none">npmjs.com/package/iobroker.metermaster ↗</a></div>
+  </div>
+</div>
+
+<div id="wl" class="pg">
+  <div class="card acc">
+    <div class="h2"><i>📶</i>WLAN-Verbindung</div>
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:12px">
+      <div class="sigbar"><span id="sb1"></span><span id="sb2"></span><span id="sb3"></span><span id="sb4"></span></div>
+      <div><div style="font-weight:700" id="wSSID">–</div>
+           <div style="font-size:.75rem;color:var(--mut)" id="wRSSI">–</div></div>
+      <button class="btn sm sec" style="margin-left:auto" onclick="loadSys()">🔄</button>
+    </div>
+    <div id="alWl" class="al"></div>
+    <div class="irow"><span class="ik">IP-Adresse</span><span class="iv" id="wIP">–</span></div>
+    <div class="irow"><span class="ik">MAC</span><span class="iv" id="wMAC">–</span></div>
+    <div class="irow"><span class="ik">Kanal</span><span class="iv" id="wCH">–</span></div>
+    <div class="irow"><span class="ik">NTP-Zeit</span><span class="iv" id="wNTP">–</span></div>
+  </div>
+  <div class="card">
+    <div class="h2"><i>💾</i>Speicher</div>
+    <div style="display:flex;gap:14px;align-items:center">
+      <div class="ring-wrap">
+        <svg width="58" height="58" viewBox="0 0 58 58">
+          <circle class="rbg" cx="29" cy="29" r="23"/>
+          <circle class="rfg" id="hRing" cx="29" cy="29" r="23" stroke-dasharray="144.5" stroke-dashoffset="144.5"/>
+        </svg>
+        <div class="rpct" id="hPct">–</div>
+      </div>
+      <div style="flex:1">
+        <div class="irow" style="padding:4px 0"><span class="ik">Heap frei</span><span class="iv" id="hFree">–</span></div>
+        <div class="irow" style="padding:4px 0"><span class="ik">Gesamt</span><span class="iv" id="hTotal">–</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="h2"><i>📦</i>Sketch / System</div>
+    <div class="irow"><span class="ik">Sketch belegt</span><span class="iv" id="sUsed">–</span></div>
+    <div class="irow"><span class="ik">Sketch frei</span><span class="iv" id="sFree">–</span></div>
+    <div class="irow"><span class="ik">Chip</span><span class="iv" id="sChip">–</span></div>
+    <div class="irow"><span class="ik">CPU-Takt</span><span class="iv" id="sCPU">–</span></div>
+    <div class="irow"><span class="ik">Uptime</span><span class="iv" id="sUp">–</span></div>
+  </div>
+</div>
+
+<div id="al" class="pg">
+  <div id="alAl" class="al"></div>
+  <div class="card acc">
+    <div class="h2"><i>🔔</i>Alarm-Status</div>
+    <div id="alStatusCard" class="alarm-badge alarm-off" style="margin-bottom:12px;font-size:.82rem">
+      <span id="alStatDot">🔔</span><span id="alStatTxt">Alarm deaktiviert</span>
+    </div>
+    <div class="g2">
+      <div class="cell"><div class="k">Aktueller Wert</div><div class="v" id="alCurVal">–</div></div>
+      <div class="cell"><div class="k">Schwellwert</div><div class="v" id="alThrDisp">–</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="h2"><i>⚙️</i>Alarm konfigurieren</div>
+    <label>Schwellwert</label>
+    <input id="alThr" type="number" step="0.1" placeholder="100.0">
+    <label>Bedingung</label>
+    <select id="alMode">
+      <option value="above">Alarm wenn Wert ÜBER Schwellwert</option>
+      <option value="below">Alarm wenn Wert UNTER Schwellwert</option>
+    </select>
+    <label style="margin-top:12px">Alarm-Aktionen</label>
+    <div class="r2">
+      <div class="cell" style="display:flex;align-items:center;gap:8px;cursor:pointer" onclick="togCb('alLed')">
+        <input type="checkbox" id="alLed" style="width:auto;cursor:pointer">
+        <span style="font-size:.82rem">LED blinken</span>
+      </div>
+      <div class="cell" style="display:flex;align-items:center;gap:8px;cursor:pointer" onclick="togCb('alEn')">
+        <input type="checkbox" id="alEn" style="width:auto;cursor:pointer">
+        <span style="font-size:.82rem">Alarm aktiv</span>
+      </div>
+    </div>
+    <button class="btn" onclick="saveAlarm()">🔔 Alarm speichern</button>
+  </div>
+  <div class="card">
+    <div class="h2"><i>ℹ️</i>Hinweise</div>
+    <p style="font-size:.8rem;color:var(--mut);line-height:1.5">
+      Bei aktivem Alarm blinkt die rote LED und das OLED zeigt <strong>!ALM</strong>.<br>
+      Der Alarm wird nach jedem Datenabruf geprüft (Intervall: Einstellungen).
+    </p>
+  </div>
+</div>
+
+<div id="bt" class="pg">
+  <div class="card acc">
+    <div class="h2"><i>🔵</i>Bluetooth / BLE</div>
+    <div style="text-align:center;padding:20px 0">
+      <div style="font-size:2.5rem;margin-bottom:10px">🔵</div>
+      <div style="font-weight:700;margin-bottom:8px">In Vorbereitung</div>
+      <p style="font-size:.8rem;color:var(--mut);line-height:1.6;max-width:300px;margin:0 auto">
+        BLE benötigt ca. 500 KB zusätzlichen Flash-Speicher.<br>
+        Für BLE-Support in Arduino IDE unter<br>
+        <strong>Tools → Partition Scheme</strong> wählen:<br><br>
+        <code style="background:rgba(0,0,0,.3);padding:3px 7px;border-radius:4px">Huge APP (3MB No OTA)</code><br><br>
+        Danach kann BLE-Scan aktiviert werden.
+      </p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="h2"><i>🔮</i>Geplante BLE-Features</div>
+    <p style="font-size:.8rem;color:var(--mut);line-height:1.7">
+      • BLE-Scan: Geräte in der Nähe anzeigen<br>
+      • Xiaomi LYWSD03MMC Thermometer direkt auslesen<br>
+      • Temperatur/Luftfeuchtigkeit auf OLED anzeigen<br>
+      • BLE → ioBroker Gateway-Funktion<br>
+      • iBeacon-Erkennung für Präsenz-Automation
+    </p>
+  </div>
+</div>
+
+<div id="car" class="pg">
+  <div id="alCar" class="al"></div>
+
+  <div class="card acc">
+    <div class="h2"><i>🎠</i>Carousel-Status</div>
+    <div class="g2">
+      <div class="cell"><div class="k">Carousel aktiv</div>
+        <div class="v" id="carActive">–</div></div>
+      <div class="cell"><div class="k">Aktuell angezeigt</div>
+        <div class="v" id="carCurrent">–</div></div>
+    </div>
+    <div style="display:flex;gap:7px;margin-top:12px">
+      <button class="btn sec" style="margin-top:0;flex:1" onclick="carPrev()">⏮ Zurück</button>
+      <button class="btn" style="margin-top:0;flex:1" onclick="carNext()">Weiter ⏭</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="h2"><i>⚙️</i>Carousel konfigurieren</div>
+    <div class="r2">
+      <div class="cell" style="display:flex;align-items:center;gap:8px;cursor:pointer" onclick="togCb('carOn')">
+        <input type="checkbox" id="carOn" style="width:auto;cursor:pointer">
+        <span style="font-size:.82rem">Carousel ein</span>
+      </div>
+      <div>
+        <label style="margin-top:0">Intervall (s)</label>
+        <input id="carSec" type="number" min="3" max="300" value="10">
+      </div>
+    </div>
+    <div style="display:flex;gap:7px;margin-top:12px">
+      <button class="btn" style="margin-top:0;flex:1" onclick="carSave()">💾 Speichern</button>
+      <button class="btn sec" style="margin-top:0" onclick="loadCarouselUI()">🔄</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="h2"><i>📋</i>Zähler-Liste
+      <span style="margin-left:auto;font-size:.7rem;color:var(--mut)" id="carCount"></span>
+    </div>
+    <div id="carList" style="margin-bottom:10px">
+      <div style="color:var(--mut);font-size:.8rem">Keine Zähler konfiguriert.</div>
+    </div>
+    <div style="background:rgba(0,0,0,.2);border:1px solid var(--brd);border-radius:8px;padding:12px">
+      <div style="font-size:.75rem;color:var(--p2);font-weight:600;margin-bottom:8px">+ Zähler hinzufügen</div>
+      <input id="carAddSid"   placeholder="State-ID (metermaster.0...)" style="margin-bottom:6px">
+      <div class="r2">
+        <input id="carAddLbl" placeholder="Bezeichnung">
+        <input id="carAddUnt" placeholder="Einheit">
+      </div>
+      <div style="display:flex;gap:7px;margin-top:8px">
+        <button class="btn sm sec" onclick="carFromDiscover()">📋 Aus Discover</button>
+        <button class="btn sm" onclick="carAdd()">+ Hinzufügen</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="h2"><i>📡</i>Node-Registrierung</div>
+    <label>Gerätename (in ioBroker sichtbar)</label>
+    <div style="display:flex;gap:7px">
+      <input id="nodeNameIn" placeholder="MeterMaster Node" style="flex:1">
+      <button class="btn sm" onclick="saveNodeName()">💾</button>
+    </div>
+    <div class="irow" style="margin-top:10px"><span class="ik">MAC-Adresse</span><span class="iv" id="carMac">–</span></div>
+    <div class="irow"><span class="ik">ioBroker State-Pfad</span><span class="iv" id="carStatePath" style="font-size:.72rem;text-align:right">–</span></div>
+    <p style="font-size:.77rem;color:var(--mut);margin-top:10px;line-height:1.5">
+      Der ESP32 schreibt sich automatisch in ioBroker ein.<br>
+      Der MeterMaster-Adapter liest <code style="background:rgba(0,0,0,.3);padding:1px 4px;border-radius:3px">metermaster.0.nodes.*</code>
+      und zeigt alle Nodes in der Admin-UI.
+    </p>
+  </div>
+</div>
+
+<div id="dbg" class="pg">
+  <div id="alDbg" class="al"></div>
+  <div class="card acc">
+    <div class="h2"><i>🪲</i>Debug Log
+      <button class="btn sm sec" style="margin:0 0 0 auto;padding:4px 10px" onclick="clearLog()">Leeren</button>
+      <button class="btn sm" style="margin:0 0 0 6px;padding:4px 10px" onclick="loadLog()">🔄</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+      <label style="display:flex;align-items:center;gap:6px;font-size:.8rem;cursor:pointer">
+        <input type="checkbox" id="autoRef" checked style="width:auto"> Auto-Refresh (3s)
+      </label>
+      <span style="font-size:.75rem;color:var(--mut)" id="logMeta"></span>
+    </div>
+    <div id="logBox" style="background:#0d0d14;border:1px solid var(--brd);border-radius:8px;
+         padding:10px;font-family:monospace;font-size:.72rem;max-height:420px;overflow-y:auto;
+         color:#c4b5fd;line-height:1.7"></div>
+  </div>
+  <div class="card">
+    <div class="h2"><i>💾</i>Speicher</div>
+    <div class="g2">
+      <div class="cell"><div class="k">Heap frei</div><div class="v" id="dbgHeap">–</div></div>
+      <div class="cell"><div class="k">Min. Heap</div><div class="v" id="dbgMinHeap">–</div></div>
+    </div>
+    <div id="dbgHeapBar" style="margin-top:10px;height:6px;border-radius:3px;background:var(--brd)">
+      <div id="dbgHeapFill" style="height:6px;border-radius:3px;background:linear-gradient(90deg,#a78bfa,#7c3aed);transition:width .4s;width:0%"></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="h2"><i>⚙️</i>Debug-Aktionen</div>
+    <div style="display:flex;gap:7px;flex-wrap:wrap">
+      <button class="btn sm sec" onclick="dbgFetch()">🔄 Fetch auslösen</button>
+      <button class="btn sm sec" onclick="dbgRegister()">📡 Node registrieren</button>
+      <button class="btn sm sec" onclick="dbgRestart()">♻️ ESP32 neu starten</button>
+    </div>
+    <div id="alDbgAct" class="al" style="margin-top:8px"></div>
+  </div>
+</div>
+
+<div id="ota" class="pg">
+  <div class="card acc">
+    <div class="h2"><i>🚀</i>GitHub Release wählen</div>
+    <div class="g2" style="margin-bottom:10px">
+      <div class="cell"><div class="k">Installiert</div><div class="v" id="otaFwCur">–</div></div>
+      <div class="cell"><div class="k">Neuestes Release</div><div class="v" id="otaFwNew">–</div></div>
+    </div>
+    <div style="margin-bottom:10px">
+      <label style="font-size:.78rem;color:var(--mut);display:block;margin-bottom:5px">Version wählen</label>
+      <div style="display:flex;gap:7px">
+        <select id="relSel" onchange="relSelect()" style="flex:1;background:var(--card2);color:var(--fg);border:1px solid var(--brd);
+                border-radius:8px;padding:8px 10px;font-size:.85rem">
+          <option value="">– Releases laden –</option>
+        </select>
+        <button class="btn sec" style="margin-top:0;padding:0 14px" onclick="loadReleases()">🔄</button>
+      </div>
+    </div>
+    <div id="relInfo" style="display:none;background:var(--card2);border:1px solid var(--brd);border-radius:8px;
+         padding:10px 12px;font-size:.78rem;margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+        <span id="relName" style="font-weight:700;color:var(--p2)"></span>
+        <span id="relDate" style="color:var(--mut)"></span>
+      </div>
+      <div id="relAsset" style="color:var(--mut)"></div>
+    </div>
+    <div id="alOtaCheck" class="al"></div>
+    <div style="display:flex;gap:7px;margin-top:8px">
+      <button id="otaFlashBtn" class="btn" style="margin-top:0;flex:1;display:none"
+              onclick="flashFromGitHub()">⚡ Flash via OTA</button>
+      <a id="otaDlBtn" class="btn sec" style="margin-top:0;flex:1;text-decoration:none;display:none;text-align:center"
+         href="#" target="_blank">⬇ .bin herunterladen</a>
+    </div>
+    <div id="otaFlashProgress" style="display:none;margin-top:10px">
+      <div style="font-size:.78rem;color:var(--mut);margin-bottom:5px">
+        ⚠ Der ESP32 lädt die .bin von GitHub und installiert sie. Browser bleibt offen.</div>
+      <div class="pb show" style="display:block!important"><div class="pbi" id="piGh" style="width:0%;animation:prog 30s linear forwards"></div></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="h2"><i>📦</i>Lokales Update (.bin)</div>
+    <div id="alOta" class="al"></div>
+    <div class="drop" id="dropZ" onclick="document.getElementById('fIn').click()"
+         ondragover="evD(event,true)" ondragleave="evD(event,false)" ondrop="drpD(event)">
+      <div class="ei">📦</div>
+      <div><strong>Firmware .bin hier ablegen</strong></div>
+      <div style="font-size:.75rem;margin-top:4px">oder klicken zum Auswählen</div>
+      <div class="fn" id="fName"></div>
+    </div>
+    <input type="file" id="fIn" accept=".bin" style="display:none"
+           onchange="if(this.files[0])upload(this.files[0])">
+    <div class="pb" id="pb"><div class="pbi" id="pi"></div></div>
+    <div class="g2" style="margin-top:12px">
+      <div class="cell"><div class="k">Gerät</div><div class="v">ESP32 D1 Mini</div></div>
+      <div class="cell"><div class="k">IP</div><div class="v" id="otaIp">–</div></div>
+    </div>
+    <p style="font-size:.75rem;color:var(--mut);margin-top:10px">
+      .bin erzeugen: Arduino IDE → <em>Sketch → Exportiere kompilierte Binärdatei</em>
+    </p>
+  </div>
+</div>
+
+<div id="info" class="pg">
+  <div class="card acc" style="text-align:center;padding:24px 16px">
+    <div style="font-size:2.2rem;margin-bottom:8px">⚡</div>
+    <div style="font-weight:800;font-size:1.1rem;background:linear-gradient(90deg,#a78bfa,#c4b5fd);
+         -webkit-background-clip:text;-webkit-text-fill-color:transparent">MeterMaster Node</div>
+    <div style="font-size:.78rem;color:var(--mut);margin-top:4px" id="infoVer">v–</div>
+    <div style="font-size:.75rem;color:var(--mut);margin-top:2px">ESP32 D1 Mini · OLED 64×48</div>
+  </div>
+  <div class="card">
+    <div class="h2"><i>📝</i>Changelog</div>
+    <div class="irow"><span class="ik">v0.4.1</span><span class="iv" style="font-size:.75rem;text-align:right">cmd-Fernsteuerung (LED, Zähler),<br>Heartbeat-Kachel, oledStyle-Fix</span></div>
+    <div class="irow"><span class="ik">v0.4.0</span><span class="iv" style="font-size:.75rem;text-align:right">Adapter-HTTP statt simple-api,<br>Register / Config / Ack</span></div>
+    <div class="irow"><span class="ik">v0.3.0</span><span class="iv" style="font-size:.75rem;text-align:right">U8g2 OLED, Umlaute,<br>GitHub OTA-Dropdown</span></div>
+    <div class="irow"><span class="ik">v0.1.4</span><span class="iv" style="font-size:.75rem;text-align:right">Info-Tab, GitHub OTA,<br>OLED-Stile, Adapter-Version</span></div>
+    <div class="irow"><span class="ik">v0.1.3</span><span class="iv" style="font-size:.75rem;text-align:right">Alarm-Tab, Bluetooth-Tab,<br>Discover im Einstellungen-Tab</span></div>
+    <div class="irow"><span class="ik">v0.1.2</span><span class="iv" style="font-size:.75rem;text-align:right">NTP-Zeit, WLAN-Tab,<br>LED-Steuerung, Lila Theme</span></div>
+    <div class="irow"><span class="ik">v0.1.1</span><span class="iv" style="font-size:.75rem;text-align:right">ioBroker Discover-Dropdown,<br>OTA Update, Web-Interface</span></div>
+    <div class="irow"><span class="ik">v0.1.0</span><span class="iv" style="font-size:.75rem;text-align:right">Erstveröffentlichung</span></div>
+  </div>
+  <div class="card">
+    <div class="h2"><i>🔗</i>GitHub Repositories</div>
+    <div class="irow">
+      <span class="ik">ESP32 Node</span>
+      <a id="ghEspLink" href="#" target="_blank"
+         style="font-size:.78rem;color:var(--p2);text-decoration:none">
+        MPunktBPunkt/esp32.MeterMaster ↗
+      </a>
+    </div>
+    <div class="irow">
+      <span class="ik">ioBroker Adapter</span>
+      <a href="https://github.com/MPunktBPunkt/iobroker.metermaster" target="_blank"
+         style="font-size:.78rem;color:var(--p2);text-decoration:none">
+        MPunktBPunkt/iobroker.metermaster ↗
+      </a>
+    </div>
+    <div class="irow">
+      <span class="ik">MeterMaster App</span>
+      <a href="https://github.com/MPunktBPunkt" target="_blank"
+         style="font-size:.78rem;color:var(--p2);text-decoration:none">
+        github.com/MPunktBPunkt ↗
+      </a>
+    </div>
+  </div>
+  <div class="card">
+    <div class="h2"><i>⚖️</i>Lizenz &amp; Kontakt</div>
+    <p style="font-size:.8rem;color:var(--mut);line-height:1.6">
+      Open Source – MIT Lizenz<br>
+      Entwickelt als Companion-Hardware für die MeterMaster App &amp; den ioBroker-Adapter.<br>
+      Issues &amp; Feature-Requests gerne auf GitHub!
+    </p>
+  </div>
+</div>
+
+<script>
+const TABS=['db','cfg','wl','al','bt','car','dbg','ota','info'];
+let discStates=[];
+
+function tab(id){
+  TABS.forEach((t,i)=>{
+    document.getElementById(t).classList.toggle('act',t===id);
+    document.querySelectorAll('.tab')[i].classList.toggle('act',t===id);
+  });
+  if(id==='wl') loadSys();
+  if(id==='al') loadAlarmUI();
+  if(id==='info') loadInfo();
+  if(id==='dbg')  loadLog();
+  if(id==='ota')   loadReleases();
+  if(id==='car')  loadCarouselUI();
+}
+
+function al(id,type,msg,ms=0){
+  const e=document.getElementById(id);
+  e.className='al show al-'+(type==='ok'?'ok':type==='err'?'err':type==='warn'?'warn':'inf');
+  e.textContent=msg;
+  if(ms>0) setTimeout(()=>e.className='al',ms);
+}
+
+// ── Dashboard ─────────────────────────────────────────────────────────────────
+function setLedUi(on){
+  const d=document.getElementById('ledDot'),l=document.getElementById('ledLbl'),b=document.getElementById('ledBtn');
+  if(!d)return;
+  if(on){d.style.background='#ef4444';d.style.border='2px solid #f87171';d.style.boxShadow='0 0 8px #ef4444';
+    l.textContent='An';b.textContent='LED ausschalten';b.className='btn red';}
+  else{d.style.background='#374151';d.style.border='2px solid #4b5563';d.style.boxShadow='none';
+    l.textContent='Aus';b.textContent='LED einschalten';b.className='btn';}
+}
+function toggleLed(){
+  fetch('/api/led?state=toggle').then(r=>r.json()).then(d=>setLedUi(d.ledOn));
+}
+
+function setAlarmBadge(active,txt,elemId){
+  const e=document.getElementById(elemId);
+  if(!e)return;
+  e.className='alarm-badge '+(active?'alarm-on pulse':'alarm-off');
+  e.innerHTML=(active?'🚨':'🔔')+' <span>'+txt+'</span>';
+}
+
+function refreshDash(){
+  fetch('/api/status').then(r=>r.json()).then(d=>{
+    document.getElementById('dVal').textContent=parseFloat(d.value).toFixed(2);
+    document.getElementById('dUnit').textContent=' '+d.unit;
+    document.getElementById('dLbl').textContent=d.label;
+    document.getElementById('dDot').className='dot '+(d.ok?'dok':'derr');
+    document.getElementById('dSt').textContent=d.ok?'Verbunden':d.status;
+    document.getElementById('dAge').textContent=d.lastFetch;
+    document.getElementById('dTs').textContent='Ablesung: '+d.readingDate+' '+d.readingTime;
+    document.getElementById('topIp').textContent='📶 '+d.ip;
+    document.getElementById('otaIp').textContent=d.ip;
+    setLedUi(d.ledOn);
+    setAlarmBadge(d.alarmActive, d.alarmActive?'ALARM AKTIV':'Kein Alarm','alarmBadge');
+    // Heartbeat-Kachel
+    const regDot=document.getElementById('dRegDot');
+    const regSt=document.getElementById('dRegSt');
+    const regAge=document.getElementById('dRegAge');
+    if(regDot&&regSt&&regAge){
+      if(d.registerOk){
+        regDot.style.background='#4CAF50';regDot.style.border='2px solid #81C784';regDot.style.boxShadow='0 0 6px #4CAF50';
+        regSt.textContent='Registriert';regSt.style.color='#A5D6A7';
+      } else {
+        regDot.style.background='#F44336';regDot.style.border='2px solid #E57373';regDot.style.boxShadow='none';
+        regSt.textContent='Nicht registriert';regSt.style.color='#EF9A9A';
+      }
+      regAge.textContent=d.lastRegisterAgo||'–';
+    }
+    const hubDot=document.getElementById('dHubDot');
+    const hubSt=document.getElementById('dHubSt');
+    const hubAge=document.getElementById('dHubAge');
+    if(hubDot&&hubSt&&hubAge){
+      if(d.hubOk){
+        hubDot.style.background='#4CAF50';hubDot.style.border='2px solid #81C784';hubDot.style.boxShadow='0 0 6px #4CAF50';
+        hubSt.textContent='Im ESP-Hub sichtbar';hubSt.style.color='#A5D6A7';
+      } else if(d.hubPort>0) {
+        hubDot.style.background='#F44336';hubDot.style.border='2px solid #E57373';hubDot.style.boxShadow='none';
+        hubSt.textContent='Nicht im ESP-Hub';hubSt.style.color='#EF9A9A';
+      } else {
+        hubDot.style.background='#374151';hubDot.style.border='2px solid #4b5563';hubDot.style.boxShadow='none';
+        hubSt.textContent='Deaktiviert';hubSt.style.color='#9CA3AF';
+      }
+      hubAge.textContent=d.lastHubAgo||'–';
+    }
+    // Dropdown vorbelegen
+    const sel=document.getElementById('oSel');
+    if(sel.options.length<=1&&d.stateId){
+      const o=new Option(d.label+' ('+d.stateId+')',JSON.stringify({id:d.stateId,label:d.label,unit:d.unit}));
+      sel.add(o); sel.value=o.value;
+    }
+    document.getElementById('oLbl').value=d.label;
+    document.getElementById('oUnt').value=d.unit;
+    if(d.oledStyle!==undefined) initStyleBtns(d.oledStyle);
+  }).catch(()=>{});
+}
+setInterval(refreshDash,15000);
+
+function testHub(){
+  al('alCfgHub','inf','Verbinde mit ESP-Hub…');
+  const b={hubPort:+(document.getElementById('cHPort').value||8093)};
+  fetch('/api/testhub',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})
+    .then(r=>r.json()).then(d=>al('alCfgHub',d.ok?'ok':'err',d.ok?'✓ '+d.msg:'✗ '+d.msg,4000))
+    .catch(e=>al('alCfgHub','err','✗ '+e.message,4000));
+}
+
+function testAdapter(){
+  al('alCfgAdapter','inf','Verbinde mit Adapter…');
+  const b={adapterPort:+(document.getElementById('cAPort').value||8089)};
+  fetch('/api/testadapter',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})
+    .then(r=>r.json()).then(d=>al('alCfgAdapter',d.ok?'ok':'err',d.ok?'✓ '+d.msg:'✗ '+d.msg,4000))
+    .catch(e=>al('alCfgAdapter','err','✗ '+e.message,4000));
+}
+
+// ── OLED Dropdown ─────────────────────────────────────────────────────────────
+function oSelChange(){
+  const v=document.getElementById('oSel').value;
+  if(!v)return;
+  try{const s=JSON.parse(v);document.getElementById('oLbl').value=s.label;document.getElementById('oUnt').value=s.unit;}catch(e){}
+}
+function saveOled(){
+  const sid=document.getElementById('oSel').value;
+  let stateId="";
+  try{stateId=JSON.parse(sid).id;}catch(e){stateId="";}
+  if(!stateId){al('alOled','err','Bitte erst einen Zähler auswählen.');return;}
+  const b={stateId:stateId,label:document.getElementById('oLbl').value,unit:document.getElementById('oUnt').value,oledStyle:curStyle};
+  fetch('/api/oled',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})
+    .then(r=>r.json()).then(d=>al('alOled',d.ok?"ok":"err",d.ok?'✓ OLED aktualisiert & gespeichert.':'✗ '+d.msg,3000));
+}
+
+// ── Einstellungen ─────────────────────────────────────────────────────────────
+
+// ── OLED Stil-Auswahl ─────────────────────────────────────────────────────────
+var curStyle = 0;
+
+// Markiert den gewählten Stil-Button und merkt die Wahl in curStyle.
+function setStyle(s) {
+  curStyle = s;
+  document.querySelectorAll('.style-btn').forEach(function(b) {
+    b.classList.toggle('act', parseInt(b.getAttribute('data-s')) === s);
+  });
+}
+
+// Initialisiert die Stil-Buttons mit dem vom ESP32 gelesenen Stil.
+function initStyleBtns(s) {
+  setStyle(parseInt(s) || 0);
+}
+
+function loadCfg(){
+  loadAdapterVersion();
+  fetch('/api/settings').then(r=>r.json()).then(d=>{
+    document.getElementById('cHost').value=d.iobHost;
+    document.getElementById('cPort').value=d.iobPort;
+    document.getElementById('cAPort').value=d.adapterPort||8089;
+    document.getElementById('cHPort').value=(d.hubPort===undefined?8093:d.hubPort);
+    document.getElementById('cSid').value=d.stateId;
+    document.getElementById('cLbl').value=d.label;
+    document.getElementById('cUnt').value=d.unit;
+    document.getElementById('cInt').value=d.interval;
+  });
+}
+function saveCfg(){
+  const b={iobHost:document.getElementById('cHost').value,
+           iobPort:+document.getElementById('cPort').value,
+           adapterPort:+(document.getElementById('cAPort').value||8089),
+           hubPort:+(document.getElementById('cHPort').value||8093),
+           stateId:document.getElementById('cSid').value,
+           label:document.getElementById('cLbl').value,
+           unit:document.getElementById('cUnt').value,
+           interval:+document.getElementById('cInt').value};
+  fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})
+    .then(r=>r.json()).then(d=>{al('alCfg',d.ok?"ok":"err",d.ok?'✓ Gespeichert.':'✗ '+d.msg,3000);});
+}
+function testConn(){
+  al('alCfg','inf','Verbinde…');
+  const b={iobHost:document.getElementById('cHost').value,
+           iobPort:+document.getElementById('cPort').value,
+           stateId:document.getElementById('cSid').value};
+  fetch('/api/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})
+    .then(r=>r.json()).then(d=>al('alCfg',d.ok?"ok":"err",d.ok?'✓ OK – Wert: '+parseFloat(d.value).toFixed(3):'✗ '+d.msg,4000));
+}
+
+let discStatesCfg=[];
+function discover(){
+  al('alDisc','inf','Lade Zählerliste von ioBroker…');
+  document.getElementById('discSel').innerHTML='<option>Lade…</option>';
+  fetch('/api/discover').then(r=>r.json()).then(d=>{
+    if(!d.ok){al('alDisc','err','✗ '+d.msg);return;}
+    discStatesCfg=d.states;
+    const sel=document.getElementById('discSel');
+    sel.innerHTML='<option value="">– Zähler wählen –</option>';
+    // Dashboard-Dropdown auch befüllen
+    const oSel=document.getElementById('oSel');
+    oSel.innerHTML='<option value="">– Zähler wählen –</option>';
+    d.states.forEach((s,i)=>{
+      const txt=s.label+' ('+parseFloat(s.val).toFixed(2)+(s.unit?' '+s.unit:"")+')';
+      const val=JSON.stringify({id:s.id,label:s.label.split(' · ').slice(-2,-1)[0]||s.label,unit:s.unit});
+      sel.add(new Option(txt,i));
+      oSel.add(new Option(txt,val));
+    });
+    document.getElementById('discMeta').textContent=d.states.length+' Zähler gefunden.';
+    al('alDisc','ok','✓ '+d.states.length+' Zähler geladen.',3000);
+  }).catch(e=>al('alDisc','err','✗ '+e));
+}
+function discSelect(){
+  const idx=document.getElementById('discSel').value;
+  if(idx==="")return;
+  const s=discStatesCfg[parseInt(idx)];
+  document.getElementById('cSid').value=s.id;
+  const parts=s.label.split(' · ');
+  document.getElementById('cLbl').value=parts.length>=2?parts[parts.length-2]:s.label;
+  document.getElementById('cUnt').value=s.unit;
+  document.getElementById('discMeta').textContent='Wert: '+parseFloat(s.val).toFixed(3)+(s.unit?' '+s.unit:"");
+}
+
+// ── WLAN ──────────────────────────────────────────────────────────────────────
+function fmtB(b){return b<1024?b+' B':b<1048576?(b/1024).toFixed(1)+' KB':(b/1048576).toFixed(1)+' MB';}
+function fmtUp(s){const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=s%60;return(h?h+"h ":"")+m+'m '+sec+'s';}
+function setSig(q){[25,50,75,100].forEach((l,i)=>document.getElementById('sb'+(i+1)).classList.toggle('on',q>=l));}
+function loadSys(){
+  fetch('/api/sysinfo').then(r=>r.json()).then(d=>{
+    document.getElementById('wSSID').textContent=d.ssid;
+    document.getElementById('wRSSI').textContent=d.rssi+' dBm ('+d.quality+'%)';
+    document.getElementById('wIP').textContent=d.ip;
+    document.getElementById('wMAC').textContent=d.mac;
+    document.getElementById('wCH').textContent='Kanal '+d.channel;
+    document.getElementById('wNTP').textContent=d.ntpSynced?d.nowDate+' '+d.nowTime+' ✓':'Nicht synchronisiert';
+    setSig(d.quality);
+    const used=Math.round(100-d.heapFree/d.heapTotal*100);
+    document.getElementById('hRing').style.strokeDashoffset=144.5*(1-used/100);
+    document.getElementById('hPct').textContent=used+'%';
+    document.getElementById('hFree').textContent=fmtB(d.heapFree);
+    document.getElementById('hTotal').textContent=fmtB(d.heapTotal);
+    document.getElementById('sUsed').textContent=fmtB(d.sketchUsed);
+    document.getElementById('sFree').textContent=fmtB(d.sketchFree);
+    document.getElementById('sChip').textContent=d.chipModel+' @ '+d.cpuFreq+' MHz';
+    document.getElementById('sCPU').textContent=d.cpuFreq+' MHz';
+    document.getElementById('sUp').textContent=fmtUp(d.uptime);
+  }).catch(e=>al('alWl','err','Fehler: '+e));
+}
+
+// ── Alarm ─────────────────────────────────────────────────────────────────────
+function togCb(id){const c=document.getElementById(id);c.checked=!c.checked;}
+function loadAlarmUI(){
+  fetch('/api/settings').then(r=>r.json()).then(d=>{
+    document.getElementById('alThr').value=d.alarmThreshold||100;
+    document.getElementById('alMode').value=d.alarmAbove?'above':'below';
+    document.getElementById('alEn').checked=d.alarmEnabled||false;
+  });
+  fetch('/api/status').then(r=>r.json()).then(d=>{
+    document.getElementById('alCurVal').textContent=parseFloat(d.value).toFixed(2)+' '+d.unit;
+    document.getElementById('alThrDisp').textContent=(d.alarmThreshold||'–')+' '+d.unit;
+    setAlarmBadge(d.alarmActive,d.alarmActive?'ALARM AKTIV – Schwellwert überschritten!':'Kein Alarm','alStatusCard');
+  });
+}
+function saveAlarm(){
+  const b={iobHost:null,iobPort:null,stateId:null,label:null,unit:null,interval:null,
+           alarmEnabled:document.getElementById('alEn').checked,
+           alarmThreshold:+document.getElementById('alThr').value,
+           alarmAbove:document.getElementById('alMode').value==='above'};
+  fetch('/api/alarm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})
+    .then(r=>r.json()).then(d=>al('alAl',d.ok?"ok":"err",d.ok?'✓ Alarm gespeichert.':'✗ '+d.msg,3000));
+}
+
+// ── Carousel ─────────────────────────────────────────────────────────────────
+let carEntries = [];
+
+function loadCarouselUI() {
+  fetch('/api/carousel').then(r=>r.json()).then(d=>{
+    document.getElementById('carOn').checked = d.active;
+    document.getElementById('carSec').value  = d.interval;
+    document.getElementById('carCurrent').textContent =
+      d.entries.length > 0 ? (d.entries[d.current]?.label||'–')+' ('+d.current+'/'+(d.entries.length-1)+')' : '–';
+    document.getElementById('carActive').textContent = d.active ? '✓ Aktiv' : '✗ Inaktiv';
+    document.getElementById('carCount').textContent  = d.entries.length+' / 5 Zähler';
+    carEntries = d.entries;
+    renderCarList();
+  }).catch(e=>al('alCar','err','Fehler: '+e));
+  fetch('/api/nodeinfo').then(r=>r.json()).then(d=>{
+    document.getElementById('carMac').textContent = d.mac;
+    document.getElementById('carStatePath').textContent = 'metermaster.0.nodes.'+d.mac;
+    document.getElementById('nodeNameIn').value = d.name||"";
+  }).catch(()=>{});
+}
+
+function renderCarList() {
+  var el = document.getElementById('carList');
+  if (!carEntries || carEntries.length === 0) {
+    el.innerHTML = '<div style="color:var(--mut);font-size:.8rem">Keine Zaehler. Unten hinzufuegen.</div>';
+    return;
+  }
+  var html="";
+  for(var i=0;i<carEntries.length;i++){
+    var e=carEntries[i];
+    html += '<div class="ble-item" style="display:flex;align-items:center;gap:8px">';
+    html += '<div style="flex:1"><div class="bn">'+(e.label||'(kein Label)')+
+            ' <span style="font-size:.7rem;color:var(--mut)">'+e.unit+'</span></div>';
+    html += '<div class="ba">'+e.sid+'</div></div>';
+    html += '<div style="display:flex;flex-direction:column;gap:4px">';
+    if(i>0)
+      html += '<button class="btn sm sec" style="padding:3px 8px" onclick="carMoveUp('+i+')">&#x25B2;</button>';
+    else
+      html += '<div style="height:22px"></div>';
+    if(i<carEntries.length-1)
+      html += '<button class="btn sm sec" style="padding:3px 8px" onclick="carMoveDown('+i+')">&#x25BC;</button>';
+    html += '</div>';
+    html += '<button class="btn sm" style="background:linear-gradient(135deg,#991b1b,#ef4444);padding:4px 10px"'
+          + ' onclick="carRemove('+i+')">&times;</button>';
+    html += '</div>';
+  }
+  el.innerHTML = html;
+}
+function carAdd() {
+  const sid = document.getElementById('carAddSid').value.trim();
+  const lbl = document.getElementById('carAddLbl').value.trim();
+  const unt = document.getElementById('carAddUnt').value.trim();
+  if (!sid) { al('alCar','err','State-ID fehlt.',2000); return; }
+  if (carEntries.length >= 5) { al('alCar','warn','Maximum 5 Zähler.',2000); return; }
+  carEntries.push({sid, label:lbl||sid.split('.').pop(), unit:unt});
+  document.getElementById('carAddSid').value="";
+  document.getElementById('carAddLbl').value="";
+  document.getElementById('carAddUnt').value="";
+  renderCarList();
+  document.getElementById('carCount').textContent = carEntries.length+' / 5 Zähler';
+}
+
+function carFromDiscover() {
+  const sel = document.getElementById('discSel');
+  if (!sel || sel.value==="") { al('alCar','warn','Zuerst in Einstellungen "Zähler laden" klicken.',3000); return; }
+  const idx = parseInt(sel.value);
+  if (isNaN(idx)||!discStates[idx]) return;
+  const s = discStates[idx];
+  document.getElementById('carAddSid').value = s.id;
+  const parts = s.label.split(' · ');
+  document.getElementById('carAddLbl').value = parts.length>=2?parts[parts.length-2]:s.label;
+  document.getElementById('carAddUnt').value = s.unit;
+}
+
+function carRemove(i) { carEntries.splice(i,1); renderCarList(); document.getElementById('carCount').textContent=carEntries.length+' / 5 Zähler'; }
+function carMoveUp(i) { if(i<1)return; var _t=carEntries[i]; carEntries[i]=carEntries[i-1]; carEntries[i-1]=_t; renderCarList(); }
+function carMoveDown(i){ if(i>=carEntries.length-1)return; var _t=carEntries[i]; carEntries[i]=carEntries[i+1]; carEntries[i+1]=_t; renderCarList(); }
+
+function carSave() {
+  const b = {
+    active: document.getElementById('carOn').checked,
+    interval: +document.getElementById('carSec').value,
+    entries: carEntries
+  };
+  fetch('/api/carousel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})
+    .then(r=>r.json()).then(d=>{
+      al('alCar',d.ok?"ok":"err",d.ok?'✓ Carousel gespeichert & aktiv.':'✗ '+d.msg,3000);
+      if(d.ok) loadCarouselUI();
+    });
+}
+
+function carNext() {
+  fetch('/api/carousel/next').then(r=>r.json()).then(d=>{
+    if(d.ok) { al('alCar','inf','→ '+d.label,1500); loadCarouselUI(); }
+  });
+}
+function carPrev() {
+  // kein eigener Endpoint – UI-seitig
+  al('alCar','inf','Tipp: Carousel blättert automatisch vorwärts.',2000);
+}
+
+function saveNodeName() {
+  const n = document.getElementById('nodeNameIn').value.trim();
+  if (!n) return;
+  fetch('/api/nodename?name='+encodeURIComponent(n))
+    .then(r=>r.json()).then(d=>al('alCar',d.ok?"ok":"err",d.ok?'✓ Name gespeichert.':'✗',2000));
+}
+
+// ── OTA ───────────────────────────────────────────────────────────────────────
+function evD(e,ov){e.preventDefault();document.getElementById('dropZ').classList.toggle('ov',ov);}
+function drpD(e){e.preventDefault();document.getElementById('dropZ').classList.remove('ov');
+  if(e.dataTransfer.files[0])upload(e.dataTransfer.files[0]);}
+function upload(f){
+  if(!f.name.endsWith('.bin')){al('alOta','err','Bitte eine .bin-Datei!');return;}
+  document.getElementById('fName').textContent=f.name+' ('+(f.size/1024).toFixed(1)+' KB)';
+  al('alOta','inf','Lade hoch…');
+  const pb=document.getElementById('pb'),pi=document.getElementById('pi');
+  pb.classList.add('show');pi.style.width='0%';
+  const fd=new FormData();fd.append('update',f,f.name);
+  const xhr=new XMLHttpRequest();
+  xhr.upload.onprogress=e=>{if(e.lengthComputable)pi.style.width=(e.loaded/e.total*100)+'%';};
+  xhr.onload=()=>{pb.classList.remove('show');
+    xhr.status===200?(al('alOta','ok','✓ Update OK! Neustart in 5 s…'),setTimeout(()=>location.reload(),6000))
+    :al('alOta','err','✗ '+xhr.responseText);};
+  xhr.onerror=()=>{pb.classList.remove('show');al('alOta','err','✗ Verbindungsfehler.');};
+  xhr.open('POST','/update');xhr.send(fd);
+}
+
+// ── Debug / Log ───────────────────────────────────────────────────────────────
+var logAutoRef = null;
+
+function loadLog() {
+  fetch('/api/log').then(r=>r.json()).then(function(entries){
+    var box = document.getElementById('logBox');
+    if (!entries.length) {
+      box.innerHTML = '<span style="color:var(--mut)">Noch keine Einträge.</span>';
+      document.getElementById('logMeta').textContent = "";
+      return;
+    }
+    document.getElementById('logMeta').textContent = entries.length + ' Einträge';
+    var html = "";
+    for (var i = entries.length - 1; i >= 0; i--) {
+      var e = entries[i];
+      var t = (e.ts / 1000).toFixed(1);
+      html += '<div style="border-bottom:1px solid rgba(255,255,255,.05);padding:2px 0">'
+            + '<span style="color:#6b7280;margin-right:8px">[' + t + 's]</span>'
+            + '<span>' + e.msg.replace(/</g,"&lt;") + '</span></div>';
+    }
+    box.innerHTML = html;
+    box.scrollTop = box.scrollHeight;
+  }).catch(function(){ al('alDbg','err','Log nicht ladbar'); });
+  // Heap
+  fetch('/api/sysinfo').then(r=>r.json()).then(function(d){
+    document.getElementById('dbgHeap').textContent = (d.heapFree/1024).toFixed(1)+' KB';
+    document.getElementById('dbgMinHeap').textContent = (d.heapTotal/1024).toFixed(1)+' KB gesamt';
+    var pct = Math.round(d.heapFree / d.heapTotal * 100);
+    document.getElementById('dbgHeapFill').style.width = pct + '%';
+  }).catch(function(){});
+  // Auto-refresh
+  if (document.getElementById('autoRef') && document.getElementById('autoRef').checked) {
+    clearTimeout(logAutoRef);
+    logAutoRef = setTimeout(loadLog, 3000);
+  }
+}
+
+function clearLog() {
+  document.getElementById('logBox').innerHTML = '<span style="color:var(--mut)">Geleert (nur lokal).</span>';
+  document.getElementById('logMeta').textContent = "";
+}
+
+function dbgFetch() {
+  fetch('/api/status').then(r=>r.json()).then(function(d){
+    al('alDbgAct','ok','Fetch OK: ' + d.value + ' ' + d.unit, 3000);
+    loadLog();
+  }).catch(function(){ al('alDbgAct','err','Fetch fehlgeschlagen', 3000); });
+}
+
+function dbgRegister() {
+  fetch('/api/nodeinfo').then(r=>r.json()).then(function(d){
+    al('alDbgAct','ok','Node: ' + d.mac + ' | IP: ' + d.ip, 3000);
+    loadLog();
+  }).catch(function(){ al('alDbgAct','err','Fehler', 3000); });
+}
+
+function dbgRestart() {
+  if (!confirm('ESP32 wirklich neu starten?')) return;
+  fetch('/api/restart')
+  .finally(function(){ al('alDbgAct','inf','Neustart ausgelöst...', 5000); });
+}
+
+// ── Info Tab ──────────────────────────────────────────────────────────────────
+var GH_U = 'MPunktBPunkt';
+var GH_E = 'esp32.MeterMaster';
+var GH_I = 'iobroker.metermaster';
+
+function loadInfo() {
+  fetch('/api/version').then(r=>r.json()).then(function(d){
+    document.getElementById('infoVer').textContent = 'v' + d.version + ' (Build: ' + d.build + ')';
+    var url = 'https://github.com/' + GH_U + '/' + GH_E;
+    var el = document.getElementById('ghEspLink');
+    if (el) { el.href = url; el.textContent = GH_U + '/' + GH_E + ' ↗'; }
+  }).catch(function(){});
+}
+
+
+// Vergleicht zwei Versions-Strings (z.B. "0.3.0" vs "0.2.0").
+// Gibt >0 zurück wenn a neuer, <0 wenn b neuer, 0 wenn gleich.
+function semverCmp(a, b) {
+  var pa = a.split('.').map(Number);
+  var pb = b.split('.').map(Number);
+  for (var i = 0; i < 3; i++) {
+    var d = (pa[i]||0) - (pb[i]||0);
+    if (d !== 0) return d;
+  }
+  return 0;
+}
+
+// Gespeicherte Releases-Liste und aktuelle Firmware-Version
+var ghReleases = [];
+var curFwVer = '';
+var selBinUrl = '';
+
+// Wird beim Öffnen des OTA-Tabs und manuell aufgerufen
+function loadReleases() {
+  al('alOtaCheck', 'inf', 'Lade Releases von GitHub…');
+  document.getElementById('relSel').innerHTML = '<option value="">Lade…</option>';
+  document.getElementById('relInfo').style.display = 'none';
+  document.getElementById('otaFlashBtn').style.display = 'none';
+  document.getElementById('otaDlBtn').style.display = 'none';
+
+  // Firmware-Version vom ESP32 holen
+  fetch('/api/version').then(r=>r.json()).then(function(d){
+    curFwVer = d.version;
+    document.getElementById('otaFwCur').textContent = 'v' + curFwVer;
+    document.getElementById('otaIp').textContent = d.ip || location.hostname;
+
+    // Alle Releases von GitHub laden (max. 20)
+    fetch('https://api.github.com/repos/' + GH_U + '/' + GH_E + '/releases?per_page=20',
+      {headers: {'Accept': 'application/vnd.github.v3+json'}})
+    .then(r=>r.json()).then(function(releases){
+      if (!releases || !releases.length) {
+        al('alOtaCheck','warn','Keine Releases auf GitHub gefunden.');
+        document.getElementById('relSel').innerHTML = '<option value="">Keine Releases</option>';
+        return;
+      }
+      ghReleases = releases;
+      var latest = (releases[0].tag_name || '').replace(/^v/,'');
+      document.getElementById('otaFwNew').textContent = 'v' + latest;
+
+      // Dropdown befüllen
+      var sel = document.getElementById('relSel');
+      sel.innerHTML = '';
+      releases.forEach(function(rel, i) {
+        var ver = (rel.tag_name || '').replace(/^v/,'');
+        var hasBin = (rel.assets||[]).some(function(a){return a.name.endsWith('.bin');});
+        var label = rel.tag_name + (i===0?' (neueste)':'') + (ver===curFwVer?' ← installiert':'') + (!hasBin?' [kein .bin]':'');
+        var opt = document.createElement('option');
+        opt.value = i;
+        opt.textContent = label;
+        if (ver === curFwVer) opt.style.color = '#a78bfa';
+        sel.appendChild(opt);
+      });
+
+      // Vergleich installiert vs. neueste (semver-aware)
+      var cmp = semverCmp(curFwVer, latest);
+      if (cmp === 0) {
+        al('alOtaCheck','ok','✓ Firmware ist aktuell (v' + latest + ').', 5000);
+      } else if (cmp > 0) {
+        al('alOtaCheck','inf','ℹ Installiert (v' + curFwVer + ') ist neuer als letztes Release (v' + latest + ').');
+      } else {
+        al('alOtaCheck','warn','⬆ Neue Version v' + latest + ' verfügbar!');
+      }
+
+      // Ersten Eintrag direkt anzeigen
+      relSelect();
+    }).catch(function(){ al('alOtaCheck','err','GitHub nicht erreichbar.'); });
+  }).catch(function(){ al('alOtaCheck','err','ESP32 nicht erreichbar.'); });
+}
+
+// Wird bei Änderung der Dropdown-Auswahl aufgerufen
+function relSelect() {
+  var idx = parseInt(document.getElementById('relSel').value);
+  if (isNaN(idx) || !ghReleases[idx]) {
+    document.getElementById('relInfo').style.display = 'none';
+    document.getElementById('otaFlashBtn').style.display = 'none';
+    document.getElementById('otaDlBtn').style.display = 'none';
+    return;
+  }
+  var rel = ghReleases[idx];
+  var asset = (rel.assets||[]).find(function(a){return a.name.endsWith('.bin');});
+  selBinUrl = asset ? asset.browser_download_url : '';
+
+  // Release-Info anzeigen
+  document.getElementById('relInfo').style.display = '';
+  document.getElementById('relName').textContent = rel.tag_name + (rel.name && rel.name !== rel.tag_name ? ' – ' + rel.name : '');
+  var d = new Date(rel.published_at);
+  document.getElementById('relDate').textContent = d.toLocaleDateString('de-DE');
+  document.getElementById('relAsset').textContent = asset ? ('📁 ' + asset.name + ' (' + (asset.size/1024).toFixed(0) + ' KB)') : '⚠ Kein .bin Asset in diesem Release';
+
+  // Buttons
+  if (selBinUrl) {
+    document.getElementById('otaFlashBtn').style.display = '';
+    document.getElementById('otaDlBtn').style.display = '';
+    document.getElementById('otaDlBtn').href = selBinUrl;
+  } else {
+    document.getElementById('otaFlashBtn').style.display = 'none';
+    document.getElementById('otaDlBtn').style.display = 'none';
+  }
+}
+
+// Flasht die gewählte Version direkt per OTA vom GitHub-Download
+function flashFromGitHub() {
+  if (!selBinUrl) { al('alOtaCheck','err','Kein .bin ausgewählt.'); return; }
+  var idx = parseInt(document.getElementById('relSel').value);
+  var ver = ghReleases[idx] ? (ghReleases[idx].tag_name||'') : '?';
+  if (!confirm('Firmware ' + ver + ' jetzt flashen?\nDer ESP32 startet danach neu.')) return;
+
+  al('alOtaCheck','inf','⚡ Sende Flash-Auftrag an ESP32…');
+  document.getElementById('otaFlashProgress').style.display = '';
+  document.getElementById('otaFlashBtn').disabled = true;
+
+  fetch('/api/ota-github', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({url: selBinUrl, version: ver})
+  }).then(r=>r.json()).then(function(d){
+    if (d.ok) {
+      al('alOtaCheck','ok','✓ ESP32 lädt Firmware herunter und startet neu…');
+      setTimeout(function(){ location.reload(); }, 25000);
+    } else {
+      al('alOtaCheck','err','✗ ' + (d.msg||'Fehler'));
+      document.getElementById('otaFlashProgress').style.display = 'none';
+      document.getElementById('otaFlashBtn').disabled = false;
+    }
+  }).catch(function(){
+    al('alOtaCheck','err','✗ Verbindung zum ESP32 unterbrochen.');
+    document.getElementById('otaFlashProgress').style.display = 'none';
+    document.getElementById('otaFlashBtn').disabled = false;
+  });
+}
+
+// Alias für onchange im select-Element
+function relSelChange() { relSelect(); }
+
+// Compat: alter Name bleibt erhalten falls irgendwo genutzt
+function checkUpdate() { loadReleases(); }
+
+function loadAdapterVersion() {
+  fetch('https://api.github.com/repos/' + GH_U + '/' + GH_I + '/releases/latest',
+    {headers: {'Accept': 'application/vnd.github.v3+json'}})
+  .then(r=>r.json()).then(function(d){
+    var el = document.getElementById('adapterVerVal');
+    if (el) el.textContent = (d.tag_name || '–') + ' auf GitHub';
+  }).catch(function(){
+    var el = document.getElementById('adapterVerVal');
+    if (el) el.textContent = '(GitHub nicht erreichbar)';
+  });
+}
+
+
+window.onload=()=>{refreshDash();loadCfg();};
+</script></body></html>
